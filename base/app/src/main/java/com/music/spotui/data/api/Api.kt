@@ -803,12 +803,6 @@ class Api constructor(
     }
 
     /**
-     * Liked Songs as a page: cached list shown instantly, then refreshed. A list read in full less
-     * than [LIKED_FULL_MS] ago only has its newest page read again (the hearts of this account
-     * and a like or unlike anywhere else land there); after that, with no list on storage, or
-     * with [full] (a pull-to-refresh), every page is read.
-     */
-    /**
      * The phone files liked on this phone (LocalLikes), as Liked Songs rows. A device file
      * has no account id, so the account's liked list can never carry it; the rows are added
      * to the page here instead, on top (they are the newest likes of this phone). Their play
@@ -835,6 +829,12 @@ class Api constructor(
         return locals.filter { it.url !in urls } + tracks
     }
 
+    /**
+     * Liked Songs as a page: cached list shown instantly, then refreshed. A list read in full less
+     * than [LIKED_FULL_MS] ago only has its newest page read again (the hearts of this account
+     * and a like or unlike anywhere else land there); after that, with no list on storage, or
+     * with [full] (a pull-to-refresh), every page is read.
+     */
     suspend fun getLikedPage(full: Boolean = false): Flow<Response<ContextPageModel>> = flow {
         fun page(tracks: List<SongsModel>, complete: Boolean) = ContextPageModel(
             uri = "spotify:collection:tracks",
