@@ -342,9 +342,61 @@ fun FolderScreen(navController: NavController, uri: String, initialName: String)
     }
 }
 
+/**
+ * "Edit title / artist" for a phone file: two fields, saved with [onSave]. The file
+ * itself is never changed — the app keeps the names (LocalMetadata) and shows them
+ * for the file everywhere.
+ */
+@Composable
+fun EditLocalTrackDialog(title: String, artist: String, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+    var newTitle by remember { mutableStateOf(title) }
+    var newArtist by remember { mutableStateOf(artist) }
+    val fieldColors = TextFieldDefaults.colors(
+        focusedContainerColor = tone(0xFF3A3A3A), unfocusedContainerColor = tone(0xFF3A3A3A),
+        focusedTextColor = AppText, unfocusedTextColor = AppText, cursorColor = Green,
+        focusedIndicatorColor = Green, unfocusedIndicatorColor = Color.Transparent,
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SheetColor,
+        title = { Text(stringResource(R.string.local_edit_title_artist), color = AppText) },
+        text = {
+            Column {
+                TextField(value = newTitle, onValueChange = { newTitle = it }, singleLine = true,
+                    label = { Text(stringResource(R.string.local_edit_song_title), color = AppMuted) },
+                    colors = fieldColors, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+                TextField(value = newArtist, onValueChange = { newArtist = it }, singleLine = true,
+                    label = { Text(stringResource(R.string.local_edit_song_artist), color = AppMuted) },
+                    colors = fieldColors, modifier = Modifier.fillMaxWidth())
+                Text(stringResource(R.string.local_edit_song_note), color = AppMuted, fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 10.dp))
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = newTitle.isNotBlank(), onClick = { onSave(newTitle, newArtist) }) {
+                Text(stringResource(R.string.playlist_save), color = Green)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.lbl_cancel), color = AppText) }
+        },
+    )
+}
+
+/** [EditLocalTrackDialog] for a stored local row: the edit lands through LocalMetadata. */
+@Composable
+fun EditLocalItemDialog(item: LocalItem, onDismiss: () -> Unit) {
+    EditLocalTrackDialog(item.title, item.artist, onDismiss) { title, artist ->
+        com.music.spotui.data.local.LocalMetadata.edit(item.uri, title, artist)
+        com.music.spotui.data.local.LocalMusic.invalidate()
+        onDismiss()
+    }
+}
+
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
-private fun LocalItemRow(item: LocalItem, current: Boolean, onClick: () -> Unit) {
+private fun LocalItemRow(item: LocalItem, current: Boolean, onClick: () -> Unit, onMenu: (() -> Unit)? = null) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().pressable(0.97f, onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
@@ -358,19 +410,35 @@ private fun LocalItemRow(item: LocalItem, current: Boolean, onClick: () -> Unit)
             Text(item.title, color = if (current) Green else AppText, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (item.artist.isNotBlank()) Text(item.artist, color = AppMuted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        if (onMenu != null) Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.size(40.dp).clip(CircleShape).pressable(0.92f, onClick = onMenu),
+        ) { Icon(Icons.Default.MoreVert, stringResource(R.string.lbl_more), tint = AppMuted, modifier = Modifier.size(20.dp)) }
     }
 }
 
-/** Phone files in a list ([items]), played by the local player; swipe right to left to remove. */
+/**
+ * Phone files in a list ([items]), played by the local player. A row leaves the list by
+ * swiping it away or from its ⋯ menu, which also edits the file's title / artist.
+ */
 fun androidx.compose.foundation.lazy.LazyListScope.localItems(items: List<LocalItem>, context: String, onRemove: (LocalItem) -> Unit) {
     itemsIndexed(items, key = { _, i -> i.key }) { index, item ->
         val np = SongPlayer.nowPlaying.value
         val track = item.toTrack()
+        var menu by remember { mutableStateOf(false) }
+        var editing by remember { mutableStateOf(false) }
         SwipeToRemove(item.key, onRemove = { onRemove(item) }) {
-            LocalItemRow(item, LocalPlayer.active.value && np.uri == "local:${track.id}") {
-                LocalPlayer.play(items.map { it.toTrack() }, index, context = context)
+            LocalItemRow(item, LocalPlayer.active.value && np.uri == "local:${track.id}",
+                onClick = { LocalPlayer.play(items.map { it.toTrack() }, index, context = context) },
+                onMenu = { menu = true })
+        }
+        if (menu) com.music.spotui.ui.components.LookSheet(onDismissRequest = { menu = false }, containerColor = SheetColor) {
+            Column(Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
+                SheetRow(Icons.Outlined.Edit, stringResource(R.string.local_edit_title_artist)) { menu = false; editing = true }
+                SheetRow(Icons.Outlined.RemoveCircleOutline, stringResource(R.string.local_remove_from_playlist)) { menu = false; onRemove(item) }
             }
         }
+        if (editing) EditLocalItemDialog(item) { editing = false }
     }
 }
 

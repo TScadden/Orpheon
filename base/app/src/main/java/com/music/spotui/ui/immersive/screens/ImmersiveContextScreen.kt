@@ -268,6 +268,9 @@ private fun ImmersiveContextContent(navController: NavController, vm: ContextVie
     var askRemoveDownloads by remember { mutableStateOf(false) }
     var playlistMenu by remember { mutableStateOf(false) }
     var addingSongs by remember { mutableStateOf(false) }
+    // A phone file added on this device, being renamed (its row's long press).
+    var editingLocal by remember { mutableStateOf<com.music.spotui.data.local.LocalItem?>(null) }
+    editingLocal?.let { item -> com.music.spotui.ui.screens.EditLocalItemDialog(item) { editingLocal = null } }
     var albumMenu by remember { mutableStateOf(false) }
     // Collaborative playlists, as on the Classic page: the people, leaving, who added what.
     var showMembers by remember { mutableStateOf(false) }
@@ -586,6 +589,7 @@ private fun ImmersiveContextContent(navController: NavController, vm: ContextVie
                             round = false,
                             playing = LocalPlayer.active.value && np.uri == "local:${track.id}",
                             onClick = { LocalPlayer.play(additions.map { it.toTrack() }, index, context = p.name) },
+                            onMore = { editingLocal = item },
                             trailing = {
                                 Icon(
                                     Icons.Rounded.Close,

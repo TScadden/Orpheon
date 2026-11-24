@@ -172,9 +172,24 @@ fun ImmersiveLocalPlaylistScreen(navController: NavController, id: String) {
     val playlist = LocalPlaylists.playlists[id]
     var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
+    // A row's own menu (long press or ⋯ on the row): edit its title / artist, or take it out.
+    var rowMenu by remember { mutableStateOf<com.music.spotui.data.local.LocalItem?>(null) }
+    var rowEditing by remember { mutableStateOf<com.music.spotui.data.local.LocalItem?>(null) }
     if (playlist == null) {
         LaunchedEffect(Unit) { navController.navigateUp() }
         return
+    }
+    rowMenu?.let { item ->
+        ImmersiveSheet(onDismiss = { rowMenu = null }) {
+            ImmersiveSheetRow(Icons.Rounded.Edit, stringResource(R.string.local_edit_title_artist), onClick = { rowMenu = null; rowEditing = item })
+            ImmersiveSheetRow(Icons.Rounded.DeleteOutline, stringResource(R.string.local_remove_from_playlist), destructive = true, onClick = {
+                rowMenu = null
+                LocalPlaylists.remove(id, item.key)
+            })
+        }
+    }
+    rowEditing?.let { item ->
+        com.music.spotui.ui.screens.EditLocalItemDialog(item) { rowEditing = null }
     }
     if (menu) ImmersiveSheet(onDismiss = { menu = false }) {
         ImmersiveSheetRow(Icons.Rounded.Edit, stringResource(R.string.local_rename), onClick = { menu = false; renaming = true })
@@ -229,6 +244,7 @@ fun ImmersiveLocalPlaylistScreen(navController: NavController, id: String) {
                         round = false,
                         playing = current && SongPlayer.isPlaying(),
                         onClick = { LocalPlayer.play(tracks, index, context = playlist.name) },
+                        onMore = { rowMenu = item },
                     )
                 }
             }
