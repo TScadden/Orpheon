@@ -421,6 +421,7 @@ private fun LocalItemRow(item: LocalItem, current: Boolean, onClick: () -> Unit,
  * Phone files in a list ([items]), played by the local player. A row leaves the list by
  * swiping it away or from its ⋯ menu, which also edits the file's title / artist.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 fun androidx.compose.foundation.lazy.LazyListScope.localItems(items: List<LocalItem>, context: String, onRemove: (LocalItem) -> Unit) {
     itemsIndexed(items, key = { _, i -> i.key }) { index, item ->
         val np = SongPlayer.nowPlaying.value
