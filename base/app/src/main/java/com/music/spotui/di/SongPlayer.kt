@@ -2124,8 +2124,20 @@ object SongPlayer {
     /** Save / remove the current track in Liked Songs. */
     fun setLiked(on: Boolean) {
         // A file of the device is not in the Spotify library; a stream or a download is.
+        // It is liked on this phone instead (LocalLikes), so it lands in Liked Songs too:
+        // before, the tap was only logged and the song never appeared there.
         if (LocalPlayer.active.value && !routing && localSpotifyUri(LocalPlayer.current()) == null) {
-            app.myspoti.host.android.Logbook.log("library: like not sent, the local song has no Spotify id (${LocalPlayer.current()?.uri?.scheme})")
+            val local = LocalPlayer.current()
+            if (local == null || local.isRadio) {
+                app.myspoti.host.android.Logbook.log("library: like not sent, the local song has no Spotify id (${local?.uri?.scheme})")
+                return
+            }
+            Haptics.toggle(on)
+            com.music.spotui.data.local.LocalLikes.set(local, on)
+            boundState?.likeState?.value = on
+            pushNotification(null, on)
+            likedChanges.value++
+            app.myspoti.host.android.Logbook.log("library: ${local.uri} ${if (on) "liked" else "unliked"} on this phone")
             return
         }
         Haptics.toggle(on)
@@ -3120,7 +3132,8 @@ object SongPlayer {
                 _nowPlaying.value = shown
             val song = localSong(t, dur)
             val likeUri = localSpotifyUri(t)
-            val liked = likeUri?.let { likedFor(it, library[it] ?: false) } ?: false
+            // A file of the device: its like lives on this phone (LocalLikes), not in the account.
+            val liked = likeUri?.let { likedFor(it, library[it] ?: false) } ?: com.music.spotui.data.local.LocalLikes.isLiked(t)
             // Its large cover, as a song Spotify plays shows (the queue keeps the small one).
             val cover = song.coverUri
             boundState?.let { st ->
@@ -3175,13 +3188,11 @@ object SongPlayer {
 
     /**
      * The song shown can be liked: anything with a Spotify id (from Spotify, an extension's stream,
-     * a download); not a file of the device. Read by the screens (state: recomposes as it changes).
+     * a download), and a file of the device too — its like is kept on this phone (LocalLikes).
+     * Read by the screens (state: recomposes as it changes). Before LocalLikes, a device file
+     * showed no like button at all in the Classic player and the mini player.
      */
-    val canLike: Boolean get() {
-        val uri = _nowPlaying.value.uri
-        if (!LocalPlayer.active.value || !uri.startsWith("local:")) return true
-        return uri.removePrefix("local:").toLongOrNull()?.let { com.music.spotui.data.offline.OfflineStore.byLocalId(it) } != null
-    }
+    val canLike: Boolean get() = true
 
     /** The Spotify id of a song an extension streams (audio-source), "" for files. */
     private fun streamedTrackId(t: com.music.spotui.data.local.LocalTrack) =
