@@ -33,6 +33,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -87,10 +90,18 @@ fun LocalFilesScreen(navController: NavController) {
 
     val np by SongPlayer.nowPlaying
     val playingLocal = LocalPlayer.active.value
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     var adding by remember { mutableStateOf<LocalTrack?>(null) }
     adding?.let { t -> AddLocalToPlaylistSheet(t, onDismiss = { adding = null }) }
+    var editing by remember { mutableStateOf<LocalTrack?>(null) }
+    editing?.let { t ->
+        EditLocalTrackDialog(t.title, t.artist, onDismiss = { editing = null }) { title, artist ->
+            com.music.spotui.data.local.LocalMetadata.edit(t.uri.toString(), title, artist)
+            editing = null
+            scope.launch { tracks = LocalMusic.tracks(context, refresh = true) }
+        }
+    }
     var choosingFolders by remember { mutableStateOf(false) }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
     if (choosingFolders) LocalFoldersSheet(
         onChanged = { scope.launch { tracks = LocalMusic.tracks(context) } },
         onDismiss = { choosingFolders = false },
@@ -179,8 +190,18 @@ fun LocalFilesScreen(navController: NavController) {
                             Text(t.title, color = if (current) com.music.spotui.ui.theme.AppAccent else AppText, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             if (t.artist.isNotBlank()) Text(t.artist, color = AppMuted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
+                        // Liked on this phone (LocalLikes): the file lands in Liked Songs.
+                        val liked = com.music.spotui.data.local.LocalLikes.isLiked(t)
+                        Icon(
+                            if (liked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                            stringResource(R.string.lbl_liked_songs), tint = if (liked) com.music.spotui.ui.theme.AppAccent else AppText,
+                            modifier = Modifier.size(24.dp).pressable(0.92f) { com.music.spotui.data.local.LocalLikes.set(t, !liked) })
+                        Spacer(Modifier.width(16.dp))
                         Icon(painterResource(R.drawable.ic_add), stringResource(R.string.lbl_add_to_playlist), tint = AppText,
                             modifier = Modifier.size(24.dp).pressable(0.92f) { adding = t })
+                        Spacer(Modifier.width(16.dp))
+                        Icon(Icons.Default.MoreVert, stringResource(R.string.local_edit_title_artist), tint = AppText,
+                            modifier = Modifier.size(24.dp).pressable(0.92f) { editing = t })
                     }
                 }
                 item { Spacer(Modifier.height(com.music.spotui.ui.components.bottomBarsSpace())) }

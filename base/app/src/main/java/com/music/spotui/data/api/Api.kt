@@ -803,6 +803,33 @@ class Api constructor(
     }
 
     /**
+     * The phone files liked on this phone (LocalLikes), as Liked Songs rows. A device file
+     * has no account id, so the account's liked list can never carry it; the rows are added
+     * to the page here instead, on top (they are the newest likes of this phone). Their play
+     * key is the file's own (`local:<content uri>`), so the page plays them through the
+     * local player like the rows of a local playlist. The account list itself (LikedCache,
+     * the copy on storage) stays account-only: the merge of its newest page works by
+     * account ids and must not see these.
+     */
+    private fun localLikedSongs(): List<SongsModel> =
+        com.music.spotui.data.local.LocalLikes.items.map { item ->
+            SongsModel(
+                id = stableId("localfile:" + item.uri),
+                title = item.title, album = item.album, singer = item.artist,
+                coverUri = item.artUri, url = "local:" + item.uri,
+                durationMs = item.durationMs.toInt(),
+            )
+        }
+
+    /** [tracks] (the account's liked songs) with this phone's liked files on top. */
+    private fun withLocalLiked(tracks: List<SongsModel>): List<SongsModel> {
+        val locals = localLikedSongs()
+        if (locals.isEmpty()) return tracks
+        val urls = tracks.mapTo(HashSet()) { it.url }
+        return locals.filter { it.url !in urls } + tracks
+    }
+
+    /**
      * Liked Songs as a page: cached list shown instantly, then refreshed. A list read in full less
      * than [LIKED_FULL_MS] ago only has its newest page read again (the hearts of this account
      * and a like or unlike anywhere else land there); after that, with no list on storage, or
@@ -816,13 +843,20 @@ class Api constructor(
             coverUri = "",
             ownerName = ProfileCache.name.orEmpty(),
             ownerAvatar = ProfileCache.imageUrl.orEmpty(),
-            metaLine = context.resources.getQuantityString(R.plurals.lbl_n_songs, tracks.size, tracks.size),
-            tracks = tracks,
+            metaLine = context.resources.getQuantityString(R.plurals.lbl_n_songs, withLocalLiked(tracks).size, withLocalLiked(tracks).size),
+            tracks = withLocalLiked(tracks),
             complete = complete,
         )
         if (LikedCache.tracks == null) LikedCache.tracks = withContext(Dispatchers.IO) { ScreenCache.liked.read() }
         LikedCache.tracks?.let { emit(Response.Success(page(it, true))) } ?: emit(Response.Loading())
-        if (!ready()) { if (LikedCache.tracks == null) emit(Response.Error(notSignedIn())); return@flow }
+        if (!ready()) {
+            // No account answer: this phone's liked files are still a Liked Songs page.
+            if (LikedCache.tracks == null) {
+                if (localLikedSongs().isNotEmpty()) emit(Response.Success(page(emptyList(), true)))
+                else emit(Response.Error(notSignedIn()))
+            }
+            return@flow
+        }
         val known = LikedCache.tracks
         if (!full && known != null) {
             val at = withContext(Dispatchers.IO) { ScreenCache.likedFullAt() }
@@ -869,7 +903,7 @@ class Api constructor(
         LikedCache.tracks = merged
         withContext(Dispatchers.IO) { ScreenCache.liked.write(merged) }
         SongPlayer.registerLikedSongs(merged.map { it.url })
-        merged
+        withLocalLiked(merged)
     }.getOrNull()
 
     private val LIKED_PAGE = 50

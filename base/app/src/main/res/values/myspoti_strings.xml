@@ -103,6 +103,11 @@
     <string name="local_delete_playlist">Delete playlist</string>
     <string name="local_added_to">Added to %1$s</string>
     <string name="local_playlist_empty">Add songs from Local Files with their + button.</string>
+    <string name="local_remove_from_playlist">Remove from this playlist</string>
+    <string name="local_edit_title_artist">Edit title / artist</string>
+    <string name="local_edit_song_title">Song title</string>
+    <string name="local_edit_song_artist">Artist</string>
+    <string name="local_edit_song_note">The name the app shows for this file. The file itself is not changed.</string>
     <string name="playlist_change_refused">The change to this playlist didn\'t go through</string>
     <string name="download_kept_by_list">Still downloaded: a downloaded playlist holds it</string>
     <string name="download_kept_by_named">Still downloaded: “%1$s” is downloaded and holds it</string>
@@ -214,7 +219,7 @@
     <string name="track_sort_artist">Artist</string>
     <string name="track_sort_album">Album</string>
     <string name="track_sort_duration">Duration</string>
-    <string name="setup_title">Set up Orpheon</string>
+    <string name="setup_title">Set up Scadify</string>
     <string name="setup_subtitle">Allow what you want; you can change it later in the phone settings.</string>
     <string name="setup_notifications_title">Notifications</string>
     <string name="setup_notifications_detail">Controls on the lock screen and in the notification shade</string>

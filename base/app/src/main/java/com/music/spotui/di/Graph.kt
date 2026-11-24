@@ -31,6 +31,8 @@ object Graph {
         SongPlayer.startLibraryOutbox(application)
         com.music.spotui.data.offline.OfflineCollections.refreshAll(application)
         com.music.spotui.data.local.LocalPlaylists.init(application)
+        com.music.spotui.data.local.LocalLikes.init(application)
+        com.music.spotui.data.local.LocalMetadata.init(application)
         com.music.spotui.data.local.LibraryOrder.init(application)
         runCatching { com.music.spotui.data.DataSaverGlide.install(application) }
         com.music.spotui.data.offline.OfflineDownloader.resumePending()

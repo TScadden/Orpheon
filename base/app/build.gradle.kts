@@ -15,7 +15,7 @@ val keystoreProperties = Properties().apply {
 
 // -PautomixLab: a test app with its own data, installed alongside every regular/dev build.
 val automixLab = findProperty("automixLab") != null
-// -Pclean: a debug build as its own app ("Orpheon Clean", id suffix .clean), next to every other one.
+// -Pclean: a debug build as its own app ("Scadify Clean", id suffix .clean), next to every other one.
 val cleanApp = findProperty("clean") != null
 
 
@@ -41,15 +41,17 @@ android {
     compileSdk = 37
 
     // Two channels that install side by side: betas ("2.0.0-beta.3") stay "app.orpheon.beta",
-    // signed with the first key, as "Orpheon Beta"; releases are "app.orpheon",
-    // signed with their own key, as "Orpheon". (Provisional ids: the rename from Myspoti.)
+    // signed with the first key, as "Scadify Beta"; releases are "app.orpheon",
+    // signed with their own key, as "Scadify". (Provisional ids: the rename from Myspoti.
+    // Scadify is this fork's display name only: the ids stay, so installs and the
+    // extension store are unaffected. Origin: Orpheon/Myspoti by kota-zo, GPL-3.0.)
     // Local builds (no version given) are on the beta side, like the phone test builds.
     val version = (findProperty("appVersionName") as String?) ?: "1.0.0"
     // "-beta" as in UpdateChecker.isBeta, one predicate for the app id, the label and the log stripping.
     val beta = findProperty("appVersionName") == null || version.contains("-beta")
     defaultConfig {
         applicationId = if (automixLab) "app.myspoti.automixlab" else if (beta) "app.orpheon.beta" else "app.orpheon"
-        manifestPlaceholders["appLabel"] = if (automixLab) "Myspoti Mix Lab" else if (beta) "Orpheon Beta" else "Orpheon"
+        manifestPlaceholders["appLabel"] = if (automixLab) "Myspoti Mix Lab" else if (beta) "Scadify Beta" else "Scadify"
         // The adb command line (com.music.spotui.cli): betas and debug builds only.
         manifestPlaceholders["cliEnabled"] = beta.toString()
         minSdk = 29
@@ -102,7 +104,7 @@ android {
             // Installs next to the release apps (own data, own sign-in).
             if (cleanApp) applicationIdSuffix = ".clean"
             else if (!automixLab) applicationIdSuffix = ".dev"
-            manifestPlaceholders["appLabel"] = if (cleanApp) "Orpheon Clean" else if (automixLab) "Myspoti Mix Lab" else "Orpheon dev"
+            manifestPlaceholders["appLabel"] = if (cleanApp) "Scadify Clean" else if (automixLab) "Myspoti Mix Lab" else "Scadify dev"
             manifestPlaceholders["cliEnabled"] = "true"
             buildConfigField("String", "UPDATE_REPO", "\"\"")
         }
@@ -114,7 +116,7 @@ android {
             // beta on the test phone without replacing the signed beta installed there.
             if (findProperty("overDev") != null && !automixLab) {
                 applicationIdSuffix = ".dev"
-                manifestPlaceholders["appLabel"] = "Orpheon dev"
+                manifestPlaceholders["appLabel"] = "Scadify dev"
                 buildConfigField("String", "UPDATE_REPO", "\"\"")
             }
             // The Mix Lab stays drivable from the CLI in its optimised build, as in its debug one.

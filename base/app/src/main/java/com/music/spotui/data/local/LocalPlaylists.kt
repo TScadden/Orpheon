@@ -99,6 +99,16 @@ object LocalPlaylists {
         if (left.isEmpty()) additions.remove(playlistId) else additions[playlistId] = left
     }
 
+    /** A title / artist edit (see [LocalMetadata]) reaches every stored row of that file. */
+    fun applyMetadata(uri: String, title: String, artist: String) = update {
+        playlists.forEach { (id, p) ->
+            if (p.items.any { it.uri == uri }) playlists[id] = p.copy(items = p.items.map { if (it.uri == uri) it.copy(title = title, artist = artist) else it })
+        }
+        additions.forEach { (id, list) ->
+            if (list.any { it.uri == uri }) additions[id] = list.map { if (it.uri == uri) it.copy(title = title, artist = artist) else it }
+        }
+    }
+
     private fun update(change: () -> Unit) {
         synchronized(lock) {
             ensureLoaded()

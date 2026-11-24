@@ -111,9 +111,15 @@ object LocalMusic {
                 )
             }
         }
-        cache = out
-        out
+        // The names the user gave files inside the app win over the files' tags.
+        LocalMetadata.init(context)
+        val named = out.map { LocalMetadata.apply(it) }
+        cache = named
+        named
     }
+
+    /** Forgets the read list: the next [tracks] reads the files again (a name was edited). */
+    fun invalidate() { cache = null }
 }
 
 
