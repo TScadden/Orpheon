@@ -286,7 +286,7 @@ fun LibraryCreateSheet(navController: NavController, onDismiss: () -> Unit, onLi
                 SheetRow(Icons.Outlined.Link, stringResource(R.string.import_playlist), stringResource(R.string.import_playlist_detail)) { asking = "import" }
                 SheetRow(Icons.Outlined.FolderOpen, stringResource(R.string.share_import_file), stringResource(R.string.share_import_file_detail)) {
                     if (com.music.spotui.share.ShareImport.supported) {
-                        pickShareFile(arrayOf(com.music.spotui.share.ShareZip.MIME, "application/zip", "application/x-zip-compressed"))
+                        pickShareFile.launch(arrayOf(com.music.spotui.share.ShareZip.MIME, "application/zip", "application/x-zip-compressed"))
                     } else {
                         Toast.makeText(context, context.getString(R.string.share_needs_newer_android), Toast.LENGTH_LONG).show()
                     }

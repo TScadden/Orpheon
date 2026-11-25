@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -99,6 +100,7 @@ private fun ShareRow(icon: ImageVector, label: String, detail: String? = null, e
  * before anything is packed) and the one way out phase 1 has — as a file. The QR /
  * same-Wi-Fi choice joins this sheet in phase 2.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SharePlaylistSheet(playlist: LocalPlaylist, onDismiss: () -> Unit) {
     val context = LocalContext.current
