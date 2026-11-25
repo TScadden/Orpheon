@@ -23,4 +23,23 @@
     <string name="wear_pause">Pause</string>
     <string name="wear_next">Next</string>
     <string name="wear_no_source">No extension on the watch has these songs.</string>
+    <string name="wear_updates">App updates</string>
+    <string name="wear_update_auto">Check automatically</string>
+    <string name="wear_update_auto_on">On · every 3 hours</string>
+    <string name="wear_update_auto_off">Off</string>
+    <string name="wear_update_check">Check for updates</string>
+    <string name="wear_update_available">Version %1$s available</string>
+    <string name="wear_update_uptodate">Up to date (checked just now)</string>
+    <string name="wear_update_last_checked">Last checked: %1$s</string>
+    <string name="wear_update_never">Never checked</string>
+    <string name="wear_update_rate_limited">GitHub is limiting requests right now. Try again in a few minutes.</string>
+    <string name="wear_update_check_failed">Could not check for updates. Check your connection.</string>
+    <string name="wear_update_install">Install</string>
+    <string name="wear_update_later">Later</string>
+    <string name="wear_update_downloading">Downloading… %1$d%%</string>
+    <string name="wear_update_downloading_unknown">Downloading…</string>
+    <string name="wear_update_installing">Installing…</string>
+    <string name="wear_update_needs_permission">Allow Scadify to install apps first — then the install continues.</string>
+    <string name="wear_update_allow">Allow</string>
+    <string name="wear_update_conflict">Android refused this version over the installed app: it was signed with another key. It can only be put on the watch by hand.</string>
 </resources>

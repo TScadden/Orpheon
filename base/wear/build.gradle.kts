@@ -11,8 +11,10 @@ android {
     compileSdk = 37
 
     // Scadify's own numbering, as the phone's app: the default is the current shipped build's
-    // number ("15" = v15, versionCode 200 + the number), bumped with every shipped version.
-    val version = (findProperty("appVersionName") as String?) ?: "15"
+    // number ("16" = v16, versionCode 200 + the number), bumped with every shipped version.
+    // The in-app updater compares versionNames numerically and requires the release's APK
+    // to carry the release's number, so bump both defaults with every shipped version.
+    val version = (findProperty("appVersionName") as String?) ?: "16"
     val beta = findProperty("appVersionName") == null || version.contains("-beta")
     // As the phone's app (base/app): -Pclean is the shipped channel, its own app (id suffix .clean).
     val cleanApp = findProperty("clean") != null
@@ -21,8 +23,12 @@ android {
         applicationId = if (beta) "app.orpheon.beta" else "app.orpheon"
         minSdk = 30
         targetSdk = 36
-        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 215
+        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 216
         versionName = version
+        // GitHub "owner/repo" whose releases the watch app checks for updates; empty = off
+        // (local builds). The shipped (clean) debug build sets its own repo below: the
+        // watch's releases-only companion, never the phone's feed (see WearUpdatePolicy).
+        buildConfigField("String", "UPDATE_REPO", "\"\"")
     }
     signingConfigs {
         // Scadify: same committed debug keystore as the phone app (the Data Layer links only
@@ -41,6 +47,10 @@ android {
             // the phone's suffix, whichever channel is being built.
             applicationIdSuffix = if (cleanApp) ".clean" else ".dev"
             signingConfig = signingConfigs.getByName("stableDebug")
+            // Scadify v16: the clean build IS the shipped watch app, so its update check is
+            // live and reads the watch's own releases repo. The dev build stays off: no
+            // release carries its app id.
+            buildConfigField("String", "UPDATE_REPO", "\"${if (cleanApp) "TScadden/scadify-wear-releases" else ""}\"")
         }
         release {
             isMinifyEnabled = true
@@ -49,7 +59,7 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
