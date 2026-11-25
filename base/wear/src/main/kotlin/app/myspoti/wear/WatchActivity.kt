@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
@@ -51,7 +52,7 @@ internal fun WatchApp() {
     val extensions by WatchExtensions.installed.collectAsState()
     val ui = rememberCoroutineScope()
     var syncNote by remember { mutableStateOf<String?>(null) }
-    remember { WatchExtensions.init(app); WatchModes.init(app); PhonePlayingState.load(app) }
+    remember { WatchExtensions.init(app); WatchModes.init(app); PhonePlayingState.load(app); WearUpdatePref.init(app) }
     val mode by WatchModes.mode.collectAsState()
     // The extensions' player gives no position on its own: read every second while it has a song.
     val local = localNow
@@ -103,6 +104,76 @@ internal fun WatchApp() {
     // null: being read; a failure: the phone is not there.
     val lists by produceState<Result<List<WatchList>>?>(null, attempt) { value = runCatching { PhoneLink(app).library() } }
 
+    // The watch app's own updates (Scadify v16), the phone's way: a check when the app
+    // opens (the checker itself skips when the last one is under 3 hours old), then every
+    // 3 hours while it stays open; the mode page carries the switch and the manual check.
+    val updateAuto by WearUpdatePref.on.collectAsState()
+    var updatePrompt by remember { mutableStateOf<WearUpdateChecker.Release?>(null) }
+    var updateChecking by remember { mutableStateOf(false) }
+    var updateMessage by remember { mutableStateOf<String?>(null) }
+    var updateIsError by remember { mutableStateOf(false) }
+    var updateCheckedAt by remember { mutableLongStateOf(WearUpdateChecker.lastChecked(app)) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            if (WearUpdatePref.on.value) {
+                runCatching { WearUpdateChecker.check(app) }.getOrNull()?.let { updatePrompt = it }
+            }
+            delay(WearUpdateChecker.PERIODIC_MS)
+        }
+    }
+    fun checkUpdatesNow() {
+        if (updateChecking) return
+        updateChecking = true; updateMessage = null; updateIsError = false
+        ui.launch {
+            val outcome = runCatching { WearUpdateChecker.refresh(app) }.getOrElse { WearUpdateChecker.Outcome.Failed(false) }
+            updateChecking = false
+            updateCheckedAt = WearUpdateChecker.lastChecked(app)
+            when (outcome) {
+                is WearUpdateChecker.Outcome.Found -> {
+                    updateMessage = context.getString(R.string.wear_update_available, outcome.release.version)
+                    updatePrompt = outcome.release
+                }
+                WearUpdateChecker.Outcome.UpToDate -> updateMessage = context.getString(R.string.wear_update_uptodate)
+                is WearUpdateChecker.Outcome.Failed -> {
+                    updateIsError = true
+                    updateMessage = context.getString(if (outcome.rateLimited) R.string.wear_update_rate_limited else R.string.wear_update_check_failed)
+                }
+            }
+        }
+    }
+    val updaterState by WearUpdater.state.collectAsState()
+    // Back from the "Install unknown apps" page with the switch on: carry on by itself.
+    LaunchedEffect(updaterState, updatePrompt) {
+        val r = updatePrompt ?: return@LaunchedEffect
+        while (WearUpdater.state.value == WearUpdater.State.NeedsPermission) {
+            if (WearUpdater.canInstall(app)) { ui.launch { WearUpdater.update(app, r) }; break }
+            delay(1_000)
+        }
+    }
+    fun installUpdate() {
+        val r = updatePrompt ?: return
+        when {
+            updaterState == WearUpdater.State.NeedsPermission -> WearUpdater.openInstallSettings(context)
+            updaterState is WearUpdater.State.Downloading || updaterState == WearUpdater.State.Installing -> Unit
+            else -> ui.launch { WearUpdater.update(context, r) }
+        }
+    }
+    fun dismissUpdate() {
+        val r = updatePrompt ?: return
+        WearUpdater.reset(); WearUpdateChecker.dismiss(app, r); updatePrompt = null
+    }
+
+    val prompt = updatePrompt
+    if (prompt != null) {
+        WatchUpdatePrompt(
+            release = prompt,
+            state = updaterState,
+            onInstall = { installUpdate() },
+            onLater = { dismissUpdate() },
+        )
+        return
+    }
+
     WatchPager(
         playing = playing,
         error = if (mode == WatchMode.PHONE) phoneError else error,
@@ -127,6 +198,15 @@ internal fun WatchApp() {
         artwork = artwork,
         mode = mode,
         onModeChange = { WatchModes.set(it) },
+        updateAuto = updateAuto,
+        onUpdateAutoChange = { WearUpdatePref.set(app, it) },
+        updateChecking = updateChecking,
+        updateMessage = updateMessage,
+        updateIsError = updateIsError,
+        updateLastChecked = if (updateCheckedAt <= 0L) stringResource(R.string.wear_update_never)
+            else stringResource(R.string.wear_update_last_checked,
+                android.text.format.DateUtils.getRelativeTimeSpanString(updateCheckedAt, System.currentTimeMillis(), android.text.format.DateUtils.MINUTE_IN_MILLIS)),
+        onCheckUpdates = { checkUpdatesNow() },
     )
 }
 

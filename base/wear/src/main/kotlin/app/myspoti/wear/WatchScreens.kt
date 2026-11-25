@@ -105,6 +105,13 @@ internal fun WatchPager(
     artwork: Paintable? = playing?.cover?.let { remember(it) { CoilPaintable(it) } },
     mode: WatchMode = WatchMode.WATCH,
     onModeChange: (WatchMode) -> Unit = {},
+    updateAuto: Boolean = true,
+    onUpdateAutoChange: (Boolean) -> Unit = {},
+    updateChecking: Boolean = false,
+    updateMessage: String? = null,
+    updateIsError: Boolean = false,
+    updateLastChecked: String = "",
+    onCheckUpdates: () -> Unit = {},
 ) {
     // The player first, then — in Watch mode — the library, and the mode switch last in both
     // modes, so the switch is the same swipe away whichever side is showing.
@@ -115,7 +122,7 @@ internal fun WatchPager(
                 when {
                     page == 0 -> WatchPlayer(playing, error, artwork, onPrevious, onToggle, onNext, volume, active = pager.currentPage == 0)
                     mode == WatchMode.WATCH && page == 1 -> WatchLibrary(lists, onPlay, onRetry, extensionsNote, onSyncExtensions)
-                    else -> WatchModePage(mode, onModeChange)
+                    else -> WatchModePage(mode, onModeChange, updateAuto, onUpdateAutoChange, updateChecking, updateMessage, updateIsError, updateLastChecked, onCheckUpdates)
                 }
             }
         }
@@ -124,7 +131,17 @@ internal fun WatchPager(
 
 /** Where the music plays: the phone (this watch mirrors and drives it) or the watch itself. */
 @Composable
-internal fun WatchModePage(mode: WatchMode, onModeChange: (WatchMode) -> Unit) {
+internal fun WatchModePage(
+    mode: WatchMode,
+    onModeChange: (WatchMode) -> Unit,
+    updateAuto: Boolean = true,
+    onUpdateAutoChange: (Boolean) -> Unit = {},
+    updateChecking: Boolean = false,
+    updateMessage: String? = null,
+    updateIsError: Boolean = false,
+    updateLastChecked: String = "",
+    onCheckUpdates: () -> Unit = {},
+) {
     val state = rememberTransformingLazyColumnState()
     val spec = rememberTransformationSpec()
     ScreenScaffold(scrollState = state) { padding ->
@@ -149,6 +166,109 @@ internal fun WatchModePage(mode: WatchMode, onModeChange: (WatchMode) -> Unit) {
                     secondaryLabel = { Text(stringResource(R.string.wear_mode_watch_about), maxLines = 2, overflow = TextOverflow.Ellipsis) },
                     modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
                 ) { Text(stringResource(R.string.wear_mode_watch), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+            // The watch app's own updates (Scadify v16): the automatic check's switch and
+            // the manual check, under the mode switch — the last page is the settings page.
+            item {
+                ListHeader(Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec)) {
+                    Text(stringResource(R.string.wear_updates))
+                }
+            }
+            item {
+                Button(
+                    onClick = { onUpdateAutoChange(!updateAuto) },
+                    colors = if (updateAuto) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors(),
+                    secondaryLabel = { Text(stringResource(if (updateAuto) R.string.wear_update_auto_on else R.string.wear_update_auto_off), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
+                ) { Text(stringResource(R.string.wear_update_auto), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+            item {
+                Button(
+                    onClick = onCheckUpdates,
+                    colors = ButtonDefaults.filledTonalButtonColors(),
+                    secondaryLabel = { Text(if (updateChecking) stringResource(R.string.wear_loading) else updateLastChecked, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
+                ) { Text(stringResource(R.string.wear_update_check), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+            val message = updateMessage
+            if (message != null) item {
+                Text(
+                    message, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall,
+                    color = if (updateIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * "New version" for the watch app, full screen (a watch's dialog): what the version is,
+ * its notes, then Install — the download and the system installer's confirmation follow
+ * from there — or Later, which dismisses this release until a manual check offers it
+ * again. While [WearUpdater] works, its state is the status line; a version Android
+ * refused over the installed app can only be put on by hand, so it gets no Install.
+ */
+@Composable
+internal fun WatchUpdatePrompt(
+    release: WearUpdateChecker.Release,
+    state: WearUpdater.State,
+    onInstall: () -> Unit,
+    onLater: () -> Unit,
+) {
+    val columnState = rememberTransformingLazyColumnState()
+    val spec = rememberTransformationSpec()
+    val busy = state is WearUpdater.State.Downloading || state == WearUpdater.State.Installing
+    val byHand = (state as? WearUpdater.State.Failed)?.onlyByHand == true
+    val status = when (val s = state) {
+        is WearUpdater.State.Downloading ->
+            if (s.progress >= 0f) stringResource(R.string.wear_update_downloading, (s.progress * 100).toInt())
+            else stringResource(R.string.wear_update_downloading_unknown)
+        WearUpdater.State.Installing -> stringResource(R.string.wear_update_installing)
+        WearUpdater.State.NeedsPermission -> stringResource(R.string.wear_update_needs_permission)
+        is WearUpdater.State.Failed -> if (s.onlyByHand) s.message else stringResource(R.string.wear_failed, s.message)
+        WearUpdater.State.Idle -> null
+    }
+    ScreenScaffold(scrollState = columnState) { padding ->
+        TransformingLazyColumn(state = columnState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
+            item {
+                ListHeader(Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec)) {
+                    Text(stringResource(R.string.wear_update_available, release.version))
+                }
+            }
+            if (release.notes.isNotBlank()) item {
+                Text(
+                    release.notes, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 5, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (status != null) item {
+                Text(
+                    status, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall,
+                    color = if (state is WearUpdater.State.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (!byHand) item {
+                Button(
+                    onClick = onInstall,
+                    colors = ButtonDefaults.buttonColors(),
+                    modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
+                ) {
+                    Text(stringResource(when (state) {
+                        WearUpdater.State.NeedsPermission -> R.string.wear_update_allow
+                        is WearUpdater.State.Failed -> R.string.wear_retry
+                        else -> R.string.wear_update_install
+                    }), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (!busy) item {
+                Button(
+                    onClick = onLater,
+                    colors = ButtonDefaults.filledTonalButtonColors(),
+                    modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
+                ) { Text(stringResource(R.string.wear_update_later), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
         }
     }
