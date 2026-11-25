@@ -39,12 +39,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.myspoti.engine.R
 import com.music.spotui.data.api.ProfileCache
-import com.music.spotui.data.api.SupportReminder
 import com.music.spotui.di.Graph
 import com.music.spotui.ui.components.AboutSheet
-import com.music.spotui.ui.components.SupporterBadge
-import com.music.spotui.ui.components.SupporterSheet
-import com.music.spotui.ui.components.SupportSheet
 import com.music.spotui.ui.immersive.Immersive
 import com.music.spotui.ui.immersive.components.ImmersiveCover
 import com.music.spotui.ui.immersive.components.immersiveClickable
@@ -102,7 +98,7 @@ internal fun AvatarDisc(
 
 /**
  * The profile sheet behind the avatar: account name and picture (open the public profile),
- * settings, recap, history, support and about. The same rows and
+ * settings, recap, history and about. The same rows and
  * actions as the Classic Home screen's sheet.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -142,7 +138,6 @@ internal fun ImmersiveProfileSheet(onOpen: (route: String) -> Unit, onDismiss: (
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 14.dp),
                 )
-                if (SupportReminder.level != SupportReminder.Level.NONE) SupporterBadge(Modifier.padding(start = 10.dp))
             }
             if (myId != null) {
                 Text(
@@ -171,26 +166,11 @@ internal fun ImmersiveProfileSheet(onOpen: (route: String) -> Unit, onDismiss: (
             ) {
                 onOpen(Routes.Extensions.route)
             }
-            // Donations: always here, never in the way.
-            var support by remember { mutableStateOf(false) }
-            if (support) SupportSheet(onDismiss = { support = false })
-            SheetRow(
-                stringResource(R.string.support_title),
-                stringResource(R.string.support_row_detail),
-                titleColor = Immersive.Accent,
-            ) { support = true }
-            // About: version, Discord, source code and Ko-fi.
+            // About: version, Discord and source code.
             var about by remember { mutableStateOf(false) }
             if (about) AboutSheet(onDismiss = { about = false })
             SheetRow(stringResource(R.string.lbl_bio), stringResource(R.string.about_detail)) {
                 about = true
-            }
-            var perks by remember { mutableStateOf(false) }
-            if (perks) SupporterSheet(onDismiss = { perks = false })
-            if (SupportReminder.PERKS_ENABLED) {
-                SheetRow(stringResource(R.string.supporter_perks_title), stringResource(R.string.supporter_perks_detail)) {
-                    perks = true
-                }
             }
         }
     }

@@ -85,26 +85,7 @@
     <string name="local_added_to">Adicionada a %1$s</string>
     <string name="local_playlist_empty">Adicione músicas de Arquivos locais com o botão +.</string>
     <string name="download_kept_by_list">Continua baixada: uma playlist baixada a mantém</string>
-    <string name="support_title">Apoie o Scadify</string>
-    <string name="support_scan">Escaneie com o celular</string>
-    <string name="support_action">Apoiar no Ko-fi</string>
-    <string name="support_decline">Não, obrigado</string>
-    <string name="support_row_detail">Uma pequena doação no Ko-fi ou no GitHub Sponsors ajuda a manter o app</string>
-    <string name="supporter_perks_title">Vantagens de apoiador</string>
-    <string name="supporter_perks_detail">Cor de destaque, ícone do app e um selo, como agradecimento</string>
-    <string name="supporter_perks_locked">Liberado ao apoiar o Scadify. Vale a sua palavra: nada é verificado.</string>
-    <string name="supporter_i_supported">Eu apoiei o Scadify</string>
-    <string name="supporter_how">Como você o apoiou?</string>
-    <string name="supporter_once">Uma doação</string>
-    <string name="supporter_monthly">Todo mês</string>
-    <string name="supporter_badge">Apoiador</string>
-    <string name="supporter_thanks_title">Obrigado pelo seu apoio!</string>
-    <string name="supporter_thanks_body">Se o Scadify ainda é útil para você, uma nova pequena doação ajuda a mantê-lo vivo.</string>
-    <string name="support_again">Apoiar novamente</string>
-    <string name="supporter_accent">Cor de destaque</string>
-    <string name="supporter_icon">Ícone do app</string>
-    <string name="supporter_icon_note">Quando o ícone muda, o atalho dele na tela inicial pode sumir: o app continua na sua lista de apps.</string>
-    <string name="supporter_monthly_switch">Eu apoio todo mês (sem mais lembretes)</string>
+    <string name="accent_colour">Cor de destaque</string>
     <string name="color_green">Verde</string>
     <string name="color_blue">Azul</string>
     <string name="color_purple">Roxo</string>
@@ -371,7 +352,6 @@
     <string name="settings_rotation_portrait">Retrato</string>
     <string name="settings_rotation_auto">Automática</string>
     <string name="settings_rotation_landscape">Paisagem</string>
-    <string name="support_github_action">Apoiar no GitHub</string>
     <string name="download_on_mobile_data">Baixando em dados móveis: isso usa seu plano de dados</string>
 
     <!-- Podcast show page, episode page and podcast player -->

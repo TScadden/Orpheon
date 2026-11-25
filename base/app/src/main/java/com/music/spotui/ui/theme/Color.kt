@@ -12,7 +12,7 @@ val GridBackground: Color get() = com.music.spotui.extensions.ExtensionLook.colo
 val AppPalette: Color get() = AppAccent
 val AppAccent: Color get() =
     com.music.spotui.extensions.ExtensionLook.color(app.myspoti.extensions.UiStyle.ACCENT)
-        ?: com.music.spotui.data.preferences.DynamicColorPref.accent() ?: com.music.spotui.data.api.SupportReminder.accentColor
+        ?: com.music.spotui.data.preferences.DynamicColorPref.accent() ?: com.music.spotui.data.preferences.AccentPref.accentColor
 
 /** Primary text and icons. */
 val AppText: Color = Color.White

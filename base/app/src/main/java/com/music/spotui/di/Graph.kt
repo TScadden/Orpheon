@@ -24,8 +24,8 @@ object Graph {
         com.music.spotui.data.preferences.applyCrossfade(com.music.spotui.data.preferences.getCrossfadeSeconds(application))
         com.music.spotui.data.local.ListenHistory.init(application)
         // Downloaded songs (private storage), and the downloads left unfinished last time.
-        // Supporter thank-yous (accent colour) before any screen draws.
-        com.music.spotui.data.api.SupportReminder.init(application)
+        // The accent colours, before any screen draws.
+        com.music.spotui.data.preferences.AccentPref.init(application)
         com.music.spotui.data.offline.OfflineStore.init(application)
         com.music.spotui.data.offline.OfflineCollections.init(application)
         SongPlayer.startLibraryOutbox(application)

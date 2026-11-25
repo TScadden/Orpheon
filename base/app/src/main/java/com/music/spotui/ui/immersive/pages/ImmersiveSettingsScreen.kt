@@ -948,28 +948,28 @@ private fun rotationLabel(mode: String): Int = when (mode) {
     else -> R.string.settings_rotation_portrait
 }
 
-/** The accent colour of one look, for everyone (the same palette the supporter sheet uses). */
+/** The accent colour of one look, for everyone. */
 @Composable
 private fun AccentRow(look: com.music.spotui.data.preferences.Look) {
     val ctx = LocalContext.current
     androidx.compose.foundation.layout.Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-        Text(stringResource(R.string.supporter_accent), style = Immersive.Body)
+        Text(stringResource(R.string.accent_colour), style = Immersive.Body)
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(top = 10.dp)) {
-            for (a in com.music.spotui.data.api.SupportReminder.Accent.entries) {
-                val selected = com.music.spotui.data.api.SupportReminder.accentOf(look) == a
+            for (a in com.music.spotui.data.preferences.AccentPref.Accent.entries) {
+                val selected = com.music.spotui.data.preferences.AccentPref.accentOf(look) == a
                 val name = stringResource(when (a) {
-                    com.music.spotui.data.api.SupportReminder.Accent.GREEN -> R.string.color_green
-                    com.music.spotui.data.api.SupportReminder.Accent.BLUE -> R.string.color_blue
-                    com.music.spotui.data.api.SupportReminder.Accent.PURPLE -> R.string.color_purple
-                    com.music.spotui.data.api.SupportReminder.Accent.PINK -> R.string.color_pink
-                    com.music.spotui.data.api.SupportReminder.Accent.ORANGE -> R.string.color_orange
+                    com.music.spotui.data.preferences.AccentPref.Accent.GREEN -> R.string.color_green
+                    com.music.spotui.data.preferences.AccentPref.Accent.BLUE -> R.string.color_blue
+                    com.music.spotui.data.preferences.AccentPref.Accent.PURPLE -> R.string.color_purple
+                    com.music.spotui.data.preferences.AccentPref.Accent.PINK -> R.string.color_pink
+                    com.music.spotui.data.preferences.AccentPref.Accent.ORANGE -> R.string.color_orange
                 })
                 Box(
                     Modifier.size(38.dp)
                         .semantics { contentDescription = name; role = Role.RadioButton }
                         .clip(CircleShape).background(a.color)
                         .then(if (selected) Modifier.border(3.dp, Immersive.Text, CircleShape) else Modifier)
-                        .clickable { com.music.spotui.data.api.SupportReminder.setAccent(ctx, look, a) },
+                        .clickable { com.music.spotui.data.preferences.AccentPref.setAccent(ctx, look, a) },
                 )
             }
         }
