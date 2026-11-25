@@ -10,9 +10,11 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Downloads a real release APK and hands it to the package installer. The release is
- * another app id (app.myspoti) than this test build, so the installer must refuse it:
- * that answer proves the download, the session and the status receiver work end to end.
+ * Asks for a release APK from a foreign repository. Since Scadify v14 the download
+ * policy ([UpdateDownloadPolicy]) refuses any address outside this project's own
+ * repositories before a byte moves, so the update must end at Failed — the refusal
+ * itself proves the gate is wired into the download path end to end. (Before the
+ * policy, the same test reached the installer, which refused the foreign package.)
  */
 @RunWith(AndroidJUnit4::class)
 class AppUpdaterTest {

@@ -130,14 +130,37 @@ object AppShufflePref {
 }
 
 /**
- * The automatic update check at launch (on by default: the app behaved that way before this
- * option existed). Off means no check when the app starts — a check asked for in Settings still
- * works, it reads the same release list.
+ * The value the automatic update check has after the one-time default migration
+ * ([AutoUpdateCheckPref]): before the migration, on (whatever was stored — the check now
+ * reads Scadify's own releases repo and Tyson wants it on); after it, the stored value,
+ * so a deliberate off in Settings sticks.
+ */
+internal fun autoUpdateAfterMigration(stored: Boolean?, migrated: Boolean): Boolean =
+    if (migrated) stored ?: true else true
+
+/**
+ * The automatic update check (on by default). Off means no automatic check — a check
+ * asked for in Settings still works, it reads the same release list.
+ *
+ * Scadify v14 (mirrors Tyson's Island): the check reads Scadify's own releases repo
+ * (TScadden/scadify-releases) and runs every 3 hours, and Tyson wants it ON. A one-time
+ * migration turns it on for installs that carry the switch saved from before, and
+ * records that it ran ([autoUpdateAfterMigration]); a later deliberate off sticks.
  */
 object AutoUpdateCheckPref {
     private const val KEY = "auto_update_check"
-    var on by androidx.compose.runtime.mutableStateOf(prefs(com.music.spotui.di.Graph.app).getBoolean(KEY, true))
+    private const val MIGRATED_KEY = "auto_update_check_default_migrated"
+    var on by androidx.compose.runtime.mutableStateOf(migrateDefault())
         private set
+
+    private fun migrateDefault(): Boolean {
+        val p = prefs(com.music.spotui.di.Graph.app)
+        val migrated = p.getBoolean(MIGRATED_KEY, false)
+        val stored = if (p.contains(KEY)) p.getBoolean(KEY, true) else null
+        val value = autoUpdateAfterMigration(stored, migrated)
+        if (!migrated) p.edit().putBoolean(KEY, value).putBoolean(MIGRATED_KEY, true).apply()
+        return value
+    }
 
     fun set(c: Context, value: Boolean) {
         on = value
