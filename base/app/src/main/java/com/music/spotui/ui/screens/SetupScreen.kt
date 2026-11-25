@@ -449,7 +449,12 @@ internal fun DefaultsStep(onNext: () -> Unit) {
     val catalogs = remember(repos) { com.music.spotui.extensions.ExtensionStore.read() }
     val stillLooking = repos.values.any { it.loading } || catalogs.isEmpty()
     val installed = remember(registry) { registry.extensions.map { DefaultExtensions.Installed(it.id, it.name, it.version, it.versionCode) } }
-    val states = DefaultExtensions.NAMES.associateWith { DefaultExtensions.state(it, catalogs, installed, stillLooking) }
+    // Entries offered as an update whose downloaded package proved not newer than the
+    // installed one: settled to Installed for the rest of this step (see DefaultExtensions.settled).
+    var settledNames by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val states = DefaultExtensions.NAMES.associateWith {
+        DefaultExtensions.settled(DefaultExtensions.state(it, catalogs, installed, stillLooking), it in settledNames)
+    }
 
     val scope = rememberCoroutineScope()
     // The extension the sequence is on (downloading, or its prompt open), and the ones whose
@@ -476,9 +481,15 @@ internal fun DefaultsStep(onNext: () -> Unit) {
                         failed = failed + name
                         continue
                     }
+                    // The just-offered prompt's plan, read before it clears: a package that
+                    // is not newer than the installed one means the advertised update does
+                    // not exist — the entry settles to Installed below, and leaves the
+                    // targets the button would offer again.
+                    val notNewer = pending.value?.plan is com.music.spotui.extensions.InstallPlan.NotNewer
                     // Its prompt is open: the next one is offered only once the prompt
                     // clears (installed from it, or dismissed).
                     pending.first { it == null }
+                    if (notNewer) settledNames = settledNames + name
                 }
             } finally {
                 working = null
