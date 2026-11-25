@@ -85,6 +85,22 @@ class DefaultExtensionsTest {
         assertTrue(DefaultExtensions.state("Solid Source", catalogs, emptyList(), stillLooking = false) is DefaultExtensions.State.Ready)
     }
 
+    @Test fun anUpdateWhosePackageIsNotNewerSettlesToInstalled() {
+        // Fresh Home's dead end: the listing advertises 1.1.0, the package it serves is
+        // the 1.0.0 already on the phone, so the install plan refuses as not newer. The
+        // step then calls the entry installed instead of offering the update forever.
+        val update = DefaultExtensions.State.Update(repo, entry("io.fresh", "Fresh Home", 2, "1.1.0"), "1.0.0")
+        assertEquals(DefaultExtensions.State.Installed, DefaultExtensions.settled(update, planNotNewer = true))
+        // A package that really is newer leaves the update standing.
+        assertEquals(update, DefaultExtensions.settled(update, planNotNewer = false))
+        // Nothing else settles: a fresh install offered a not-newer plan cannot happen
+        // (nothing is installed), and the other states pass through either way.
+        val ready = DefaultExtensions.State.Ready(repo, entry("io.melzo", "Melzo", 105))
+        assertEquals(ready, DefaultExtensions.settled(ready, planNotNewer = true))
+        assertEquals(DefaultExtensions.State.Installed, DefaultExtensions.settled(DefaultExtensions.State.Installed, planNotNewer = true))
+        assertEquals(DefaultExtensions.State.Unavailable, DefaultExtensions.settled(DefaultExtensions.State.Unavailable, planNotNewer = true))
+    }
+
     @Test fun noMatchIsLookingThenUnavailable() {
         val catalogs = listOf(repo to catalog(entry("io.other", "Other", 1)))
         assertEquals(DefaultExtensions.State.Looking, DefaultExtensions.state("Melzo", catalogs, emptyList(), stillLooking = true))
