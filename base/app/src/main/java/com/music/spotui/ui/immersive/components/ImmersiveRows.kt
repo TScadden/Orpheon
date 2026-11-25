@@ -7,6 +7,7 @@ package com.music.spotui.ui.immersive.components
 import com.music.spotui.ui.components.secondaryClick
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
@@ -21,6 +22,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -178,6 +181,10 @@ fun ImmersiveListRow(
     modifier: Modifier = Modifier,
     playing: Boolean = false,
     trailing: (@Composable () -> Unit)? = null,
+    /** A long press of its own (multi-select), taking the place of [onMore]'s; the ⋯ button keeps [onMore]. */
+    onLongClick: (() -> Unit)? = null,
+    /** Non-null while the list is selecting: whether this row is chosen (a badge on the cover, a tint when chosen). */
+    selected: Boolean? = null,
 ) {
     val titleColor by animateColorAsState(
         targetValue = if (playing) Immersive.Accent else Immersive.Text,
@@ -187,8 +194,8 @@ fun ImmersiveListRow(
         title = title,
         subtitle = subtitle.orEmpty(),
         onClick = onClick,
-        onLongClick = onMore,
-        modifier = modifier,
+        onLongClick = onLongClick ?: onMore,
+        modifier = if (selected == true) modifier.background(Immersive.Accent.copy(alpha = 0.14f)) else modifier,
         titleColor = titleColor,
         explicit = false,
         leading = {
@@ -199,6 +206,13 @@ fun ImmersiveListRow(
                     if (round) CircleShape else Immersive.CoverSmall,
                 )
                 if (playing) ImmersivePlayingBars(Modifier.align(Alignment.Center))
+                if (selected != null) Icon(
+                    if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                    contentDescription = null,
+                    tint = if (selected) Immersive.Accent else Immersive.Text.copy(alpha = 0.55f),
+                    modifier = Modifier.align(Alignment.BottomEnd).size(20.dp)
+                        .background(Immersive.Page, CircleShape),
+                )
             }
         },
         gapAfterLeading = 14.dp,

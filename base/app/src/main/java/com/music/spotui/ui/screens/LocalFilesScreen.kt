@@ -15,6 +15,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,9 +34,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -74,7 +77,7 @@ import com.music.spotui.ui.components.pressable
 import com.music.spotui.ui.theme.AppBackground
 
 /** "Local Files": the device's own audio files, played by [LocalPlayer]. */
-@OptIn(ExperimentalGlideComposeApi::class)
+@OptIn(ExperimentalGlideComposeApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun LocalFilesScreen(navController: NavController) {
     val context = LocalContext.current
@@ -93,6 +96,15 @@ fun LocalFilesScreen(navController: NavController) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var adding by remember { mutableStateOf<LocalTrack?>(null) }
     adding?.let { t -> AddLocalToPlaylistSheet(t, onDismiss = { adding = null }) }
+    // Multi-select (a long press starts it): the chosen tracks, by their MediaStore id.
+    var selection by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var addingSelected by remember { mutableStateOf(false) }
+    val selecting = selection.isNotEmpty()
+    androidx.activity.compose.BackHandler(enabled = selecting) { selection = emptySet() }
+    if (addingSelected) AddLocalTracksToPlaylistSheet(
+        tracks = tracks.orEmpty().filter { it.id in selection },
+        onDismiss = { addingSelected = false; selection = emptySet() },
+    )
     var editing by remember { mutableStateOf<LocalTrack?>(null) }
     editing?.let { t ->
         EditLocalTrackDialog(t.title, t.artist, t.album, onDismiss = { editing = null }) { title, artist, album ->
@@ -175,38 +187,73 @@ fun LocalFilesScreen(navController: NavController) {
                 }
                 itemsIndexed(shown, key = { _, t -> t.id }) { _, t ->
                     val current = playingLocal && np.uri == "local:${t.id}"
+                    val chosen = t.id in selection
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         // The whole folder plays from this song, even when the list is filtered.
-                        modifier = Modifier.fillMaxWidth().pressable(0.97f) { tracks?.let { all -> LocalPlayer.play(all, all.indexOf(t).coerceAtLeast(0)) } }
+                        // While selecting, a tap chooses instead of playing, and a long press
+                        // is what started the selection.
+                        modifier = Modifier.fillMaxWidth()
+                            .then(if (chosen) Modifier.background(com.music.spotui.ui.theme.AppAccent.copy(alpha = 0.14f)) else Modifier)
+                            .combinedClickable(
+                                onClick = {
+                                    if (selecting) selection = com.music.spotui.ui.components.MultiSelect.toggle(selection, t.id)
+                                    else tracks?.let { all -> LocalPlayer.play(all, all.indexOf(t).coerceAtLeast(0)) }
+                                },
+                                onLongClick = {
+                                    selection = if (selecting) com.music.spotui.ui.components.MultiSelect.toggle(selection, t.id) else setOf(t.id)
+                                },
+                            )
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                     ) {
-                        GlideImage(
-                            model = t.artUri, contentDescription = null, contentScale = ContentScale.Crop,
-                            loading = placeholder(R.drawable.placeholder), failure = placeholder(R.drawable.local_files_cover),
-                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
-                        )
+                        Box(Modifier.size(48.dp)) {
+                            GlideImage(
+                                model = t.artUri, contentDescription = null, contentScale = ContentScale.Crop,
+                                loading = placeholder(R.drawable.placeholder), failure = placeholder(R.drawable.local_files_cover),
+                                modifier = Modifier.matchParentSize().clip(RoundedCornerShape(4.dp)),
+                            )
+                            if (selecting) Icon(
+                                if (chosen) Icons.Filled.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                                contentDescription = null,
+                                tint = if (chosen) com.music.spotui.ui.theme.AppAccent else AppText.copy(alpha = 0.55f),
+                                modifier = Modifier.align(Alignment.BottomEnd).size(20.dp).background(AppBackground, CircleShape),
+                            )
+                        }
                         Column(Modifier.padding(start = 12.dp).weight(1f)) {
                             Text(t.title, color = if (current) com.music.spotui.ui.theme.AppAccent else AppText, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             if (t.artist.isNotBlank()) Text(t.artist, color = AppMuted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        // Liked on this phone (LocalLikes): the file lands in Liked Songs.
-                        val liked = com.music.spotui.data.local.LocalLikes.isLiked(t)
-                        Icon(
-                            if (liked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                            stringResource(R.string.lbl_liked_songs), tint = if (liked) com.music.spotui.ui.theme.AppAccent else AppText,
-                            modifier = Modifier.size(24.dp).pressable(0.92f) { com.music.spotui.data.local.LocalLikes.set(t, !liked) })
-                        Spacer(Modifier.width(16.dp))
-                        Icon(painterResource(R.drawable.ic_add), stringResource(R.string.lbl_add_to_playlist), tint = AppText,
-                            modifier = Modifier.size(24.dp).pressable(0.92f) { adding = t })
-                        Spacer(Modifier.width(16.dp))
-                        Icon(Icons.Default.MoreVert, stringResource(R.string.local_edit_title_artist), tint = AppText,
-                            modifier = Modifier.size(24.dp).pressable(0.92f) { editing = t })
+                        if (!selecting) {
+                            // Liked on this phone (LocalLikes): the file lands in Liked Songs.
+                            val liked = com.music.spotui.data.local.LocalLikes.isLiked(t)
+                            Icon(
+                                if (liked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                                stringResource(R.string.lbl_liked_songs), tint = if (liked) com.music.spotui.ui.theme.AppAccent else AppText,
+                                modifier = Modifier.size(24.dp).pressable(0.92f) { com.music.spotui.data.local.LocalLikes.set(t, !liked) })
+                            Spacer(Modifier.width(16.dp))
+                            Icon(painterResource(R.drawable.ic_add), stringResource(R.string.lbl_add_to_playlist), tint = AppText,
+                                modifier = Modifier.size(24.dp).pressable(0.92f) { adding = t })
+                            Spacer(Modifier.width(16.dp))
+                            Icon(Icons.Default.MoreVert, stringResource(R.string.local_edit_title_artist), tint = AppText,
+                                modifier = Modifier.size(24.dp).pressable(0.92f) { editing = t })
+                        }
                     }
                 }
                 item { Spacer(Modifier.height(com.music.spotui.ui.components.bottomBarsSpace())) }
             }
         }
+        if (selecting) ClassicSelectionBar(
+            count = selection.size,
+            onSelectAll = {
+                val shown = tracks.orEmpty().filter { com.music.spotui.ui.components.matchesFind(find, it.title, it.artist, it.album) }
+                selection = com.music.spotui.ui.components.MultiSelect.selectAll(selection, shown.map { it.id })
+            },
+            onAdd = { addingSelected = true },
+            onRemove = null,
+            onCancel = { selection = emptySet() },
+            modifier = Modifier.align(Alignment.BottomCenter)
+                .padding(bottom = com.music.spotui.ui.components.bottomBarsSpace()),
+        )
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier.statusBarsPadding().padding(12.dp).size(40.dp).clip(CircleShape)
