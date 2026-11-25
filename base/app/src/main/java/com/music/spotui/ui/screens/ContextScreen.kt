@@ -43,6 +43,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Group
+import androidx.compose.material.icons.outlined.HideImage
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -1229,7 +1231,7 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
                     Text(stringResource(R.string.local_added_section), color = AppText, fontSize = 18.sp, fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(16.dp, 20.dp, 16.dp, 4.dp))
                 }
-                localItems(additions, p.name) { com.music.spotui.data.local.LocalPlaylists.removeFromSpotify(playlistId, it.key) }
+                localItems(additions, p.name, onRemove = { com.music.spotui.data.local.LocalPlaylists.removeFromSpotify(playlistId, it.key) })
             }
         }
         // An album: Spotify's "More like this", albums close to its first song.
