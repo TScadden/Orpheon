@@ -263,6 +263,10 @@ fun MyNavHost(
             navBackStackEntry.arguments?.getString("id")?.let { if (isImmersive()) com.music.spotui.ui.immersive.pages.ImmersiveLocalPlaylistScreen(navHostController, it) else com.music.spotui.ui.screens.LocalPlaylistScreen(navHostController, it) }
         }
 
+        page("${Routes.ImportedPlaylist.route}/{id}") { navBackStackEntry ->
+            navBackStackEntry.arguments?.getString("id")?.let { if (isImmersive()) com.music.spotui.ui.immersive.screens.ImmersiveContextScreen(navHostController, type = "imported", id = it) else ContextScreen(navHostController, type = "imported", id = it) }
+        }
+
         page(
             "${Routes.ArtistReleases.route}/{aString}?id={artistId}",
             arguments = listOf(navArgument("artistId") { defaultValue = "" }),

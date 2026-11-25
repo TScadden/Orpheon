@@ -232,6 +232,8 @@ private class TvKinds(val album: String, val playlist: String, val artist: Strin
         is HomeItem.Playlist -> playlist
         is HomeItem.Artist -> artist
         is HomeItem.Show -> show
+        // A built-in shelf's song: no page of its own on the TV (see HomeItem.page).
+        is HomeItem.Track -> album
     }
 }
 
@@ -245,6 +247,8 @@ private fun HomeItem.page(likedName: String): TvPage? = when (this) {
     }
     is HomeItem.Artist -> if (id.isBlank()) null else TvPage.Artist(id, name)
     is HomeItem.Show -> if (id.isBlank() || isEpisode || !Features.PODCASTS) null else TvPage.Show(id, name)
+    // A single song has no TV page: the card is left out of the TV home.
+    is HomeItem.Track -> null
 }
 
 private fun HomeItem.subtitleText(): String = when (this) {
@@ -252,6 +256,7 @@ private fun HomeItem.subtitleText(): String = when (this) {
     is HomeItem.Playlist -> subtitle
     is HomeItem.Show -> subtitle
     is HomeItem.Artist -> ""
+    is HomeItem.Track -> subtitle
 }
 
 /** Liked Songs, then the playlists and albums of Your Library (a folder opens its own list of them). */

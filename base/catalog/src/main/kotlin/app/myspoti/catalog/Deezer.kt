@@ -66,6 +66,10 @@ class Deezer(private val fetch: Fetch, private val base: String = "https://api.d
 
     override suspend fun topTracks(id: String): List<Hit> = json("/artist/${id.q()}/top?limit=10").objects("data").map { track(it, null) }
 
+    /** The worldwide chart's tracks right now ("popular this week"), most played first. Public, no key. */
+    suspend fun chartTracks(limit: Int = 20): List<Hit> =
+        json("/chart/0/tracks?limit=$limit").objects("data").map { track(it, null) }
+
     override suspend fun discography(id: String, offset: Int, limit: Int): Page<Album> {
         val o = json("/artist/${id.q()}/albums?index=$offset&limit=$limit")
         return pageOf(o.objects("data").map(::album), offset, o.int("total") ?: 0, limit)

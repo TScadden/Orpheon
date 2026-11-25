@@ -30,6 +30,7 @@ sealed class Routes(
     object Equalizer : Routes(0, "Equalizer", "equalizer")
     object Folder : Routes(0, "Folder", "folder")
     object LocalPlaylist : Routes(0, "LocalPlaylist", "localplaylist")
+    object ImportedPlaylist : Routes(0, "ImportedPlaylist", "importedplaylist")
     object Category : Routes(0, "Category", "category")
     object NewReleases : Routes(0, "NewReleases", "newreleases")
     object Episodes : Routes(0, "Episodes", "episodes")
@@ -70,6 +71,9 @@ fun folderRoute(uri: String, name: String): String =
 
 /** A playlist kept on this phone (LocalPlaylists id). */
 fun localPlaylistRoute(id: String): String = "${Routes.LocalPlaylist.route}/${android.net.Uri.encode(id)}"
+
+/** A playlist imported from a public link, by its store id (see ImportedPlaylists). */
+fun importedPlaylistRoute(id: String): String = "${Routes.ImportedPlaylist.route}/${android.net.Uri.encode(id)}"
 
 /** Builds a podcast-show route carrying the Spotify show id (and a display name). */
 fun showRoute(id: String, name: String = ""): String =

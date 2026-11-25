@@ -66,6 +66,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -94,10 +95,11 @@ import com.music.spotui.ui.navigation.isImmersive
 object Setup {
     private const val KEY = "SetupDone"
     private const val EXTENSIONS_KEY = "SetupExtensionsSeen"
+    private const val DEFAULTS_KEY = "SetupDefaultExtensionsSeen"
     private const val ACCOUNT_KEY = "SetupAccountSeen"
-    /** The permissions step, the sound quality one, the look one or the extensions one (each new step is shown once after the update too). The music account is not a setup step in Scadify: it defaults to none and can be changed in Settings. */
+    /** The permissions step, the sound quality one, the look one or the extensions ones (each new step is shown once after the update too). The music account is not a setup step in Scadify: it defaults to none and can be changed in Settings. */
     fun needed(context: Context) = !permissionsDone(context) || !com.music.spotui.data.preferences.isQualityChosen(context) ||
-        !com.music.spotui.data.preferences.LookPref.isChosen(context) || !extensionsSeen(context)
+        !com.music.spotui.data.preferences.LookPref.isChosen(context) || !extensionsSeen(context) || !defaultsSeen(context)
     fun accountSeen(context: Context) = prefs(context).getBoolean(ACCOUNT_KEY, false)
     fun setAccountSeen(context: Context) = prefs(context).edit().putBoolean(ACCOUNT_KEY, true).apply()
     fun permissionsDone(context: Context) = prefs(context).getBoolean(KEY, false)
@@ -117,9 +119,12 @@ object Setup {
             STEP_QUALITY.takeIf { !com.music.spotui.data.preferences.isQualityChosen(context) },
             STEP_PERMISSIONS.takeIf { needPerms },
             STEP_EXTENSIONS.takeIf { !extensionsSeen(context) },
+            STEP_DEFAULT_EXTENSIONS.takeIf { !defaultsSeen(context) },
         ).ifEmpty { listOf(STEP_PERMISSIONS) }
     }
     fun setExtensionsSeen(context: Context) = prefs(context).edit().putBoolean(EXTENSIONS_KEY, true).apply()
+    fun defaultsSeen(context: Context) = prefs(context).getBoolean(DEFAULTS_KEY, false)
+    fun setDefaultsSeen(context: Context) = prefs(context).edit().putBoolean(DEFAULTS_KEY, true).apply()
     private fun prefs(context: Context) = context.getSharedPreferences("myspoti_prefs", Context.MODE_PRIVATE)
 
     /** A page to open once the app shows (the extensions step's "See the extensions"); taken by [App]. */
@@ -181,6 +186,7 @@ fun SetupScreen(onDone: () -> Unit) {
                         },
                         onLater = { Setup.setExtensionsSeen(context); next() },
                     )
+                    STEP_DEFAULT_EXTENSIONS -> DefaultsStep(onNext = { Setup.setDefaultsSeen(context); next() })
                     else -> PermissionsStep(onNext = { Setup.done(context); next() })
                 }
             }
@@ -194,6 +200,7 @@ internal const val STEP_QUALITY = 2
 internal const val STEP_EXTENSIONS = 3
 internal const val STEP_PERMISSIONS = 4
 internal const val STEP_ACCOUNT = 5
+internal const val STEP_DEFAULT_EXTENSIONS = 6
 
 /**
  * The first launch, before any sign-in: the music account, on the setup's backdrop. [onDone] once
@@ -406,6 +413,64 @@ private fun ExtensionsStep(onBrowse: () -> Unit, onLater: () -> Unit) {
         Column(Modifier.riseIn(row), horizontalAlignment = Alignment.CenterHorizontally) {
             SetupButton(stringResource(R.string.setup_ext_browse), onBrowse, Modifier.fillMaxWidth().height(50.dp))
             SetupLinkButton(stringResource(R.string.setup_ext_home), onLater, Modifier.fillMaxWidth().height(48.dp))
+        }
+    }
+}
+
+/**
+ * The default extensions, offered once (new installs and updates): each of [DefaultExtensions]
+ * with its state, and one Install button. Installing runs the store's own flow per extension —
+ * the package is downloaded from its catalogue and the standard install prompt (its actions,
+ * the third-party notice, the one tick) is shown, one after the other; nothing is ever
+ * installed without that prompt. A default no catalogue on this phone carries is said to be
+ * unavailable. Continuing without installing is always there: the store offers them later.
+ */
+@Composable
+private fun DefaultsStep(onNext: () -> Unit) {
+    val context = LocalContext.current
+    val repos by com.music.spotui.extensions.ExtensionStore.repos.collectAsState()
+    val registry by com.music.spotui.extensions.Extensions.registry.collectAsState()
+    LaunchedEffect(Unit) { com.music.spotui.extensions.ExtensionStore.refresh(com.music.spotui.extensions.Extensions.registry.value.repositories) }
+    val catalogs = remember(repos) { com.music.spotui.extensions.ExtensionStore.read() }
+    val stillLooking = repos.values.any { it.loading } || catalogs.isEmpty()
+    val installedNames = remember(registry) { registry.extensions.map { it.name }.toSet() }
+    val states = DefaultExtensions.NAMES.associateWith { DefaultExtensions.state(it, catalogs, installedNames, stillLooking) }
+    // The installs waiting for their prompt, offered one at a time (the prompt is a single
+    // shared state: the next is offered only once it clears).
+    var queue by remember { mutableStateOf<List<Pair<String, app.myspoti.extensions.Catalog.Entry>>>(emptyList()) }
+    val pendingNow by pending.collectAsState()
+    LaunchedEffect(queue, pendingNow) {
+        if (queue.isNotEmpty() && pendingNow == null) {
+            val (repo, entry) = queue.first()
+            queue = queue.drop(1)
+            installFromStore(context, repo, entry)
+        }
+    }
+    InstallPrompt()
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        var row = 0
+        SetupTitle(stringResource(R.string.setup_defaults_title), Modifier.riseIn(row++))
+        SetupSubtitle(stringResource(R.string.setup_defaults_subtitle), Modifier.riseIn(row++))
+        Spacer(Modifier.height(8.dp))
+        DefaultExtensions.NAMES.forEach { name ->
+            val detail = when (val s = states.getValue(name)) {
+                DefaultExtensions.State.Installed -> stringResource(R.string.setup_defaults_installed)
+                is DefaultExtensions.State.Ready -> stringResource(R.string.setup_defaults_ready, s.entry.version)
+                DefaultExtensions.State.Unavailable -> stringResource(R.string.setup_defaults_unavailable)
+                DefaultExtensions.State.Looking -> stringResource(R.string.setup_defaults_looking)
+            }
+            InfoRow(Icons.Rounded.Extension, name, detail, Modifier.riseIn(row++))
+        }
+        Spacer(Modifier.height(12.dp))
+        val ready = states.values.filterIsInstance<DefaultExtensions.State.Ready>()
+        Column(Modifier.riseIn(row), horizontalAlignment = Alignment.CenterHorizontally) {
+            if (ready.isNotEmpty()) SetupButton(stringResource(R.string.setup_defaults_install), {
+                queue = ready.map { it.repo to it.entry }
+            }, Modifier.fillMaxWidth().height(50.dp))
+            SetupLinkButton(stringResource(R.string.setup_continue), onNext, Modifier.fillMaxWidth().height(48.dp))
         }
     }
 }

@@ -163,7 +163,11 @@ fun ImmersiveHomeScreen(navController: NavController) {
                 )
             }
             when {
-                feed != null && feed.sections.isNotEmpty() -> {
+                // Any feed at all renders (as in the Classic Home): an empty account feed must
+                // not hide the shortcuts and the extension sections under a "nothing to show"
+                // message — with no account the account feed is always empty, and the
+                // extensions' home sections are the screen's content then.
+                feed != null -> {
                     shortcuts?.let { tiles ->
                         item(key = "home:shortcuts") {
                             // The feed fades in over its placeholder (see immersiveFeedSkeleton).
@@ -251,6 +255,7 @@ private fun HomeItem.contextUri(): String = when (this) {
     is HomeItem.Playlist -> if (id.isNotBlank()) "spotify:playlist:$id" else ""
     is HomeItem.Artist -> if (id.isNotBlank()) "spotify:artist:$id" else ""
     is HomeItem.Show -> if (id.isNotBlank() && !isEpisode) "spotify:show:$id" else ""
+    is HomeItem.Track -> if (id.isNotBlank()) "spotify:track:$id" else ""
 }
 
 /** True while this card's album, playlist or artist is the playing context, [playingContext]. */
@@ -278,6 +283,7 @@ private fun HomeItem.cardSubtitle(): String = when (this) {
     is HomeItem.Playlist -> subtitle
     is HomeItem.Artist -> stringResource(R.string.lbl_artist)
     is HomeItem.Show -> subtitle
+    is HomeItem.Track -> subtitle
 }
 
 /** The lead carousel: big artwork cards with the caption over a scrim, the next one peeking in. */

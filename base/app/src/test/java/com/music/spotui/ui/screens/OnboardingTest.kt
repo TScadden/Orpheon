@@ -58,6 +58,8 @@ class OnboardingTest {
         Setup.setAccountSeen(app)
         assertEquals(Entry.SETUP, entry(open = true))
         assertFalse(STEP_ACCOUNT in Setup.steps(app))
+        // The default extensions are offered as their own step.
+        assertTrue(STEP_DEFAULT_EXTENSIONS in Setup.steps(app))
     }
 
     @Test fun `no account or YouTube Music, and YouTube Music signs in on its own page`() {
@@ -71,7 +73,7 @@ class OnboardingTest {
 
     @Test fun `someone already set up is asked nothing again`() {
         prefs("myspoti_prefs").edit().putBoolean("SetupDone", true).putBoolean("SetupExtensionsSeen", true)
-            .putBoolean("SetupAccountSeen", true).commit()
+            .putBoolean("SetupAccountSeen", true).putBoolean("SetupDefaultExtensionsSeen", true).commit()
         com.music.spotui.data.preferences.setQualityChosen(app)
         LookPref.setChosen(app)
         assertFalse(Setup.needed(app))

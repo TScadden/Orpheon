@@ -30,6 +30,9 @@ import com.music.spotui.data.entity.PodcastModel
 import com.music.spotui.data.entity.SearchResults
 import com.music.spotui.data.entity.ShowPage
 import com.music.spotui.data.entity.SongsModel
+import com.music.spotui.data.local.ImportedPlaylists
+import com.music.spotui.data.local.ImportedSong
+import com.music.spotui.data.local.ListenHistory
 import com.music.spotui.data.local.LocalFileMatch
 import com.music.spotui.data.local.LocalMusic
 import com.music.spotui.di.Graph
@@ -418,12 +421,69 @@ class Api constructor(
                         .distinctBy { it::class.simpleName + "|" + it.name.lowercase() }
                     if (items.isEmpty()) null else HomeSection(title = shelf.title.orEmpty(), items = items)
                 }.distinctBy { it.title.lowercase().ifBlank { it.hashCode().toString() } }
-                val model = HomeFeedModel(greeting = feed.greeting, sections = sections)
+                // Scadify's own shelves under the account's (the main feed only): with no
+                // account the account feed is empty, and Home is these plus the extensions'.
+                val builtIns = if (facet.isEmpty()) builtInHomeSections(sections.mapTo(HashSet()) { it.title.lowercase() }) else emptyList()
+                val model = HomeFeedModel(greeting = feed.greeting, sections = sections + builtIns)
                 if (facet.isEmpty()) { HomeCache.home = model; ScreenCache.home.write(model) } else HomeCache.facets[facet] = model
                 emit(Response.Success(model))
             },
             onFailure = { Log.e("Api", "getHomeFeed failed", it); if (cached == null) emit(Response.Error(it.message ?: "error")) },
         )
+    }
+
+    /** Deezer's public catalogue for the built-in chart shelf, asked directly (its own parsers, no key). */
+    private val chartDeezer by lazy {
+        app.myspoti.catalog.Deezer(app.myspoti.catalog.HttpFetch(MyspotiRuntime.apiHttp, com.music.spotui.data.catalog.CatalogRuntime.USER_AGENT, 0))
+    }
+
+    /**
+     * The shelves that are Scadify's own, under the account feed's: this phone's listening
+     * ("Continue listening", "Your frequent plays", from [ListenHistory], only what there is)
+     * and the public chart ("Popular this week", Deezer's, played through the catalog like a
+     * search's songs). A title the feed already has is not repeated.
+     */
+    private suspend fun builtInHomeSections(have: Set<String>): List<HomeSection> {
+        val out = ArrayList<HomeSection>()
+        fun add(title: String, items: List<HomeItem>) {
+            if (items.isNotEmpty() && title.lowercase() !in have && out.none { it.title.equals(title, ignoreCase = true) }) out += HomeSection(title, items)
+        }
+        val listens = withContext(Dispatchers.IO) { ListenHistory.all() }
+        add(context.getString(R.string.home_continue_listening),
+            listens.sortedByDescending { it.atMs }.distinctBy { it.key }.take(12).mapNotNull(::historyTrack))
+        add(context.getString(R.string.home_frequent_plays),
+            withContext(Dispatchers.IO) { ListenHistory.recap(0) }.topTracks.mapNotNull { r ->
+                listens.firstOrNull { it.title == r.name && it.artist == r.subtitle }?.let(::historyTrack)
+            })
+        add(context.getString(R.string.home_popular_week), runCatching {
+            chartDeezer.chartTracks(20).map { hit ->
+                val t = hit.track
+                HomeItem.Track(
+                    name = t.name,
+                    imageUrl = cover(t.album?.images.orEmpty()),
+                    subtitle = t.artists.joinToString(", ") { it.name },
+                    playUrl = com.music.spotui.data.catalog.CatalogRuntime.PLAY_PREFIX + t.uri,
+                    album = t.album?.name.orEmpty(),
+                )
+            }
+        }.getOrDefault(emptyList()))
+        return out
+    }
+
+    /** A listen of this phone as a home card: what plays it again, from the key it was heard under. */
+    private fun historyTrack(l: ListenHistory.Listen): HomeItem.Track? = when {
+        l.key.startsWith("spotify:track:") -> {
+            val id = l.key.substringAfterLast(':')
+            HomeItem.Track(id = id, name = l.title, imageUrl = l.cover, subtitle = l.artist,
+                playUrl = SongPlayer.buildSpotifyPlayQuery(id, l.title, l.artist), album = l.album)
+        }
+        com.music.spotui.data.catalog.CatalogRuntime.isCatalogUri(l.key) ->
+            HomeItem.Track(name = l.title, imageUrl = l.cover, subtitle = l.artist,
+                playUrl = com.music.spotui.data.catalog.CatalogRuntime.PLAY_PREFIX + l.key, album = l.album)
+        // A phone file or an episode: no card (the file's own page is Local Files).
+        l.key.startsWith("local:") || l.key.startsWith("episode:") -> null
+        else -> HomeItem.Track(name = l.title, imageUrl = l.cover, subtitle = l.artist,
+            playUrl = SongPlayer.buildSpotifyPlayQuery("", l.title, l.artist), album = l.album)
     }
 
     // ── Search ──
@@ -890,6 +950,39 @@ class Api constructor(
         ScreenCache.markLikedFull()
         SongPlayer.registerLikedSongs(tracks.map { it.url })
         emit(Response.Success(page(tracks, true)))
+    }
+
+    /** An imported song as a row: built exactly like [songOf] builds a Spotify track, with the row's own key kept. */
+    private fun importedSongOf(s: ImportedSong): SongsModel = SongsModel(
+        id = stableId("track:${s.spotifyTrackId}"),
+        title = s.title.take(128),
+        album = s.album,
+        singer = s.artist,
+        coverUri = s.coverUrl,
+        url = SongPlayer.buildSpotifyPlayQuery(s.spotifyTrackId, s.title, s.artist),
+        spotifyTrackId = s.spotifyTrackId,
+        durationMs = s.durationMs.toInt(),
+        rowUid = s.key,
+    )
+
+    /**
+     * An imported playlist as a page: read from this phone alone (its store), whole at once.
+     * Its type is "imported": the context screens let its rows be removed and the list be
+     * renamed, which the account's editable check would never allow with no account.
+     */
+    fun getImportedPlaylistPage(id: String): Flow<Response<ContextPageModel>> = flow {
+        val p = ImportedPlaylists.get(id)
+        if (p == null) { emit(Response.Error(context.getString(R.string.imported_playlist_gone))); return@flow }
+        emit(Response.Success(ContextPageModel(
+            uri = "scadify:imported:$id",
+            type = "imported",
+            name = p.name,
+            coverUri = p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl.orEmpty(),
+            ownerName = context.getString(R.string.imported_playlist_subtitle),
+            metaLine = context.resources.getQuantityString(R.plurals.lbl_n_songs, p.items.size, p.items.size),
+            tracks = p.items.map(::importedSongOf),
+            complete = true,
+        )))
     }
 
     /**

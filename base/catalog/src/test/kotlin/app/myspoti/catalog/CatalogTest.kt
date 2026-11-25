@@ -288,6 +288,20 @@ class CatalogTest {
         assertTrue(runCatching { d.track("1") }.exceptionOrNull() is ProviderDown)
     }
 
+    @Test fun deezerChartTracks() = runBlocking {
+        val f = Scripted(mapOf(
+            "/chart/0/tracks?limit=2" to Response(200, """{"total":2,"data":[
+              {"id":11,"title":"Chart One","duration":180,"artist":{"id":7,"name":"Band"},"album":{"id":9,"title":"Album","cover_big":"b1"}},
+              {"id":12,"title":"Chart Two","duration":190,"artist":{"id":8,"name":"Solo"},"album":{"id":10,"title":"Other","cover_big":"b2"}}]}"""),
+        ))
+        val hits = Deezer(f).chartTracks(2)
+        assertEquals(listOf("Chart One", "Chart Two"), hits.map { it.track.name })
+        assertEquals("deezer:track:11", hits[0].track.uri)
+        assertEquals(180_000L, hits[0].track.durationMs)
+        assertEquals("Band", hits[0].track.artists.single().name)
+        assertEquals("b2", hits[1].track.album!!.images.single().url)
+    }
+
     @Test fun itunesSongsAlbumsAndItsMissingCount() = runBlocking {
         val f = Scripted(mapOf(
             "/search?term=song" to Response(200, """{"resultCount":2,"results":[

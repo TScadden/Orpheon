@@ -429,6 +429,7 @@ private fun HomeFeedCard(item: HomeItem, onClick: () -> Unit) {
         is HomeItem.Playlist -> item.subtitle
         is HomeItem.Artist -> stringResource(R.string.lbl_artist)
         is HomeItem.Show -> item.subtitle
+        is HomeItem.Track -> item.subtitle
     }
     Column(
         horizontalAlignment = if (isArtist) Alignment.CenterHorizontally else Alignment.Start,
