@@ -15,7 +15,7 @@ val keystoreProperties = Properties().apply {
 
 // -PautomixLab: a test app with its own data, installed alongside every regular/dev build.
 val automixLab = findProperty("automixLab") != null
-// -Pclean: a debug build as its own app ("Scadify Clean", id suffix .clean), next to every other one.
+// -Pclean: a debug build as its own app (label "Scadify", id suffix .clean), next to every other one.
 val cleanApp = findProperty("clean") != null
 
 
@@ -84,6 +84,16 @@ android {
     if (stableRelease && !hasReleaseKey && gradle.startParameter.taskNames.any { Regex("(assemble|bundle|package|install)Release").containsMatchIn(it) })
         throw GradleException("A stable release needs the release key: set MYSPOTI_KEYSTORE (CI) or add keystore/keystore.properties.")
     signingConfigs {
+        // Scadify: a committed, standard Android debug keystore (base/debug.keystore, the
+        // public androiddebugkey/"android" credentials) so every CI debug build carries the
+        // SAME signature and a new build installs over the previous one. Without it, each CI
+        // runner signed with its own throwaway debug key and updates failed to install.
+        create("stableDebug") {
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         create("release") {
             if (envStore != null) {
                 storeFile = file(envStore)
@@ -101,10 +111,13 @@ android {
 
     buildTypes {
         debug {
+            // Scadify: stable signature for CI debug builds (see the stableDebug config above).
+            signingConfig = signingConfigs.getByName("stableDebug")
             // Installs next to the release apps (own data, own sign-in).
             if (cleanApp) applicationIdSuffix = ".clean"
             else if (!automixLab) applicationIdSuffix = ".dev"
-            manifestPlaceholders["appLabel"] = if (cleanApp) "Scadify Clean" else if (automixLab) "Myspoti Mix Lab" else "Scadify dev"
+            // The clean channel's home-screen label is just "Scadify" (Tyson: no "Clean" suffix in the name).
+            manifestPlaceholders["appLabel"] = if (cleanApp) "Scadify" else if (automixLab) "Myspoti Mix Lab" else "Scadify dev"
             manifestPlaceholders["cliEnabled"] = "true"
             buildConfigField("String", "UPDATE_REPO", "\"\"")
         }
