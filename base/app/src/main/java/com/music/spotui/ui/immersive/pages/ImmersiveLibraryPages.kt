@@ -18,6 +18,7 @@ import androidx.compose.material.icons.rounded.HideImage
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.SelectAll
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -185,6 +186,7 @@ fun ImmersiveLocalPlaylistScreen(navController: NavController, id: String) {
     val scope = rememberCoroutineScope()
     var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(false) }
     // A row's own menu (⋯ on the row): edit its title / artist, or take it out. A long press
     // no longer opens it — it starts a multi-select instead (below); the ⋯ stays.
     var rowMenu by remember { mutableStateOf<com.music.spotui.data.local.LocalItem?>(null) }
@@ -227,6 +229,7 @@ fun ImmersiveLocalPlaylistScreen(navController: NavController, id: String) {
             menu = false
             LocalPlaylists.clearCover(id)
         })
+        ImmersiveSheetRow(Icons.Rounded.Share, stringResource(R.string.share_playlist), onClick = { menu = false; sharing = true })
         ImmersiveSheetRow(Icons.Rounded.DeleteOutline, stringResource(R.string.local_delete_playlist), destructive = true, onClick = {
             menu = false
             navController.navigateUp()
@@ -237,6 +240,7 @@ fun ImmersiveLocalPlaylistScreen(navController: NavController, id: String) {
         stringResource(R.string.local_rename), playlist.name, stringResource(R.string.local_rename),
         onDismiss = { renaming = false },
     ) { renaming = false; LocalPlaylists.rename(id, it) }
+    if (sharing) com.music.spotui.share.SharePlaylistSheet(playlist) { sharing = false }
 
     val np by SongPlayer.nowPlaying
     val playingHere = LocalPlayer.active.value && LocalPlayer.contextName == playlist.name

@@ -46,6 +46,7 @@ import androidx.compose.material.icons.outlined.HideImage
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.CreateNewFolder
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Group
@@ -244,6 +245,18 @@ fun LibraryCreateSheet(navController: NavController, onDismiss: () -> Unit, onLi
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var asking by remember { mutableStateOf<String?>(null) } // "playlist" | "folder" | "local"
+    // A .scadifyplaylist file someone shared: picked here, imported through the share flow.
+    var shareFile by remember { mutableStateOf<android.net.Uri?>(null) }
+    val pickShareFile = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri -> if (uri != null) shareFile = uri }
+    shareFile?.let { uri ->
+        com.music.spotui.share.ShareImportFlow(
+            uri = uri,
+            onDismiss = { shareFile = null },
+            onImported = { id -> shareFile = null; onDismiss(); navController.navigate(localPlaylistRoute(id)) },
+        )
+    }
     when (asking) {
         "playlist" -> NameDialog(stringResource(R.string.lbl_playlist_create), context.getString(R.string.my_playlist),
             stringResource(R.string.lbl_create), onDismiss = onDismiss) { name ->
@@ -271,6 +284,13 @@ fun LibraryCreateSheet(navController: NavController, onDismiss: () -> Unit, onLi
                 SheetRow(Icons.Outlined.CreateNewFolder, stringResource(R.string.lbl_folder)) { asking = "folder" }
                 SheetRow(Icons.Outlined.PhoneAndroid, stringResource(R.string.local_playlist_new), stringResource(R.string.local_add_note)) { asking = "local" }
                 SheetRow(Icons.Outlined.Link, stringResource(R.string.import_playlist), stringResource(R.string.import_playlist_detail)) { asking = "import" }
+                SheetRow(Icons.Outlined.FolderOpen, stringResource(R.string.share_import_file), stringResource(R.string.share_import_file_detail)) {
+                    if (com.music.spotui.share.ShareImport.supported) {
+                        pickShareFile.launch(arrayOf(com.music.spotui.share.ShareZip.MIME, "application/zip", "application/x-zip-compressed"))
+                    } else {
+                        Toast.makeText(context, context.getString(R.string.share_needs_newer_android), Toast.LENGTH_LONG).show()
+                    }
+                }
             }
         }
     }
@@ -629,6 +649,7 @@ fun LocalPlaylistScreen(navController: NavController, id: String) {
     val scope = rememberCoroutineScope()
     var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(false) }
     var selection by remember { mutableStateOf<Set<String>>(emptySet()) }
     var addingSelected by remember { mutableStateOf(false) }
     val pickCover = com.music.spotui.ui.components.rememberPlaylistCoverPicker { uri ->
@@ -656,6 +677,7 @@ fun LocalPlaylistScreen(navController: NavController, id: String) {
                 menu = false
                 LocalPlaylists.clearCover(id)
             }
+            SheetRow(Icons.Outlined.Share, stringResource(R.string.share_playlist)) { menu = false; sharing = true }
             SheetRow(Icons.Outlined.Delete, stringResource(R.string.local_delete_playlist)) {
                 menu = false
                 navController.navigateUp()
@@ -665,6 +687,7 @@ fun LocalPlaylistScreen(navController: NavController, id: String) {
     }
     if (renaming) NameDialog(stringResource(R.string.local_rename), playlist.name, stringResource(R.string.local_rename),
         onDismiss = { renaming = false }) { renaming = false; LocalPlaylists.rename(id, it) }
+    if (sharing) com.music.spotui.share.SharePlaylistSheet(playlist) { sharing = false }
     Box(Modifier.fillMaxSize().background(AppBackground)) {
         Column(Modifier.fillMaxSize()) {
             PageHeader(playlist.name, stringResource(R.string.local_playlist_subtitle) + " • " +
