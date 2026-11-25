@@ -95,26 +95,25 @@ object Setup {
     private const val KEY = "SetupDone"
     private const val EXTENSIONS_KEY = "SetupExtensionsSeen"
     private const val ACCOUNT_KEY = "SetupAccountSeen"
-    /** The permissions step, the sound quality one, the look one, the music account one or the extensions one (each new step is shown once after the update too). */
+    /** The permissions step, the sound quality one, the look one or the extensions one (each new step is shown once after the update too). The music account is not a setup step in Scadify: it defaults to none and can be changed in Settings. */
     fun needed(context: Context) = !permissionsDone(context) || !com.music.spotui.data.preferences.isQualityChosen(context) ||
-        !com.music.spotui.data.preferences.LookPref.isChosen(context) || !extensionsSeen(context) || !accountSeen(context)
+        !com.music.spotui.data.preferences.LookPref.isChosen(context) || !extensionsSeen(context)
     fun accountSeen(context: Context) = prefs(context).getBoolean(ACCOUNT_KEY, false)
     fun setAccountSeen(context: Context) = prefs(context).edit().putBoolean(ACCOUNT_KEY, true).apply()
     fun permissionsDone(context: Context) = prefs(context).getBoolean(KEY, false)
     fun done(context: Context) = prefs(context).edit().putBoolean(KEY, true).apply()
     fun extensionsSeen(context: Context) = prefs(context).getBoolean(EXTENSIONS_KEY, false)
     /**
-     * The steps still to show, in order: how Myspoti works (first setup only), the look, the music
-     * account (only for someone who has not chosen it: a new install chooses it before signing in,
-     * see [Onboarding]), the sound quality, the permissions, then the extensions (last, so the end of
+     * The steps still to show, in order: how Scadify works (first setup only), the look,
+     * the sound quality, the permissions, then the extensions (last, so the end of
      * the setup leads straight to their page); each skipped when done before an update.
+     * There is no music account step: the account defaults to none (see [Onboarding]).
      */
     internal fun steps(context: Context): List<Int> {
         val needPerms = !permissionsDone(context)
         return listOfNotNull(
             STEP_INTRO.takeIf { needPerms },
             STEP_LOOK.takeIf { !com.music.spotui.data.preferences.LookPref.isChosen(context) },
-            STEP_ACCOUNT.takeIf { !accountSeen(context) },
             STEP_QUALITY.takeIf { !com.music.spotui.data.preferences.isQualityChosen(context) },
             STEP_PERMISSIONS.takeIf { needPerms },
             STEP_EXTENSIONS.takeIf { !extensionsSeen(context) },
@@ -174,7 +173,6 @@ fun SetupScreen(onDone: () -> Unit) {
                         com.music.spotui.data.preferences.LookPref.setChosen(context)
                         next()
                     })
-                    STEP_ACCOUNT -> AccountStep(onNext = { Setup.setAccountSeen(context); next() })
                     STEP_EXTENSIONS -> ExtensionsStep(
                         onBrowse = {
                             Setup.setExtensionsSeen(context)

@@ -47,12 +47,14 @@ class OnboardingTest {
     private fun entry(open: Boolean, setup: Boolean = true, choosing: Boolean = false, tv: Boolean = false) =
         Onboarding.entry(open, setup, choosing, tv)
 
-    @Test fun `a new install chooses its music account, then the setup`() {
-        // Welcome first; its button leads to the account choice. No sign-in anywhere.
+    @Test fun `a new install skips the music account choice, then the setup`() {
+        // Welcome first; its button no longer leads to an account choice (Scadify removed
+        // that screen from onboarding: the account defaults to none, Settings can change it).
         assertEquals(Entry.WELCOME, entry(open = false))
-        assertTrue(Onboarding.welcomeChoosesAccount(tv = false))
-        assertEquals(Entry.ACCOUNT, entry(open = false, choosing = true))
-        // Chosen: the setup, which no longer asks the account.
+        assertFalse(Onboarding.welcomeChoosesAccount(tv = false))
+        // Even a stale choosingAccount flag cannot resurrect the account screen.
+        assertEquals(Entry.WELCOME, entry(open = false, choosing = true))
+        // Past the welcome: the setup, which does not ask the account either.
         Setup.setAccountSeen(app)
         assertEquals(Entry.SETUP, entry(open = true))
         assertFalse(STEP_ACCOUNT in Setup.steps(app))

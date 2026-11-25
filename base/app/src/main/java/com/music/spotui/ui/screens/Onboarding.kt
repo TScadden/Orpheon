@@ -24,20 +24,21 @@ enum class AfterChoice {
 }
 
 /**
- * The first launch's order: the welcome screen, the music account (YouTube Music or none), the
- * setup, the app. There is no account of the app's own to sign in to. A TV opens straight on its app.
+ * The first launch's order in Scadify: the welcome screen, the setup, the app. There is no
+ * music account choice in onboarding: the account defaults to none and can be changed later
+ * in Settings > Music account. There is no account of the app's own to sign in to.
+ * A TV opens straight on its app.
  */
 object Onboarding {
-    /** [open]: past the welcome screen and the account choice. */
+    /** [open]: past the welcome screen. The account choice is never routed to ([choosingAccount] is kept for signature compatibility and ignored). */
     fun entry(open: Boolean, setupNeeded: Boolean, choosingAccount: Boolean, tv: Boolean): Entry = when {
         open && setupNeeded -> Entry.SETUP
         open || tv -> Entry.APP
-        choosingAccount -> Entry.ACCOUNT
         else -> Entry.WELCOME
     }
 
-    /** The welcome screen's button leads to the account choice. */
-    fun welcomeChoosesAccount(tv: Boolean): Boolean = !tv
+    /** The welcome screen's button no longer leads to an account choice in Scadify. */
+    fun welcomeChoosesAccount(tv: Boolean): Boolean = false
 
     /** Continue on the account choice: YouTube Music's own sign-in while signed out, else the app. */
     fun afterChoice(provider: String, ytmSignedIn: Boolean): AfterChoice = when (provider) {

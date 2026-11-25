@@ -25,6 +25,9 @@ app/google-services.json
 *.p12
 *.pem
 keystore/
+# Scadify exception: the standard Android DEBUG keystore (public androiddebugkey/"android"
+# credentials, not a secret) is committed on purpose so CI debug builds share one signature.
+!debug.keystore
 
 # OS files
 Thumbs.db

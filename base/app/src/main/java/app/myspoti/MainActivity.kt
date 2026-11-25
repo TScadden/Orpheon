@@ -85,8 +85,10 @@ class MainActivity : AppCompatActivity() {
         // The user's rotation choice (portrait by default); changes are applied from the UI below.
         requestedOrientation = orientationFor(resources.configuration)
         setupNeeded = com.music.spotui.ui.screens.Setup.needed(this)
-        // No account to sign in to: the app opens once the welcome screen and the music account
-        // choice are behind (a TV has no choice to make).
+        // No account to sign in to and no music account choice in onboarding (Scadify skips
+        // that screen: the account defaults to none, changeable in Settings): the app opens
+        // once the welcome screen is behind. accountSeen is only the bookkeeping that marks
+        // the welcome as passed, so the account screen can never resurface.
         accountChosen = tv || com.music.spotui.ui.screens.Setup.accountSeen(this)
         signedIn = accountChosen
         // A TV has one look of its own and no setup to go through (no battery or file prompts there).
@@ -116,7 +118,7 @@ class MainActivity : AppCompatActivity() {
                                 onBack = { choosingAccount = false },
                                 onDone = { accountDone() },
                             )
-                            else -> WelcomeScreen(onLogin = { choosingAccount = true })
+                            else -> WelcomeScreen(onLogin = { accountDone() })
                         }
                         // Existing users, once, right after the update: the new look, live. Never after the
                         // onboarding, whose look step asked it already (LookPref.offered, read live).
@@ -322,7 +324,7 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    /** The account choice's Continue: the setup and the app (YouTube Music signs in on its own page first). */
+    /** Past the welcome screen: the account bookkeeping is marked seen (no account screen is shown in Scadify onboarding; the provider stays whatever it already is, none by default), then the setup and the app. */
     private fun accountDone() {
         com.music.spotui.ui.screens.Setup.setAccountSeen(this)
         accountChosen = true

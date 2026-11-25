@@ -20,8 +20,21 @@ android {
         versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 200
         versionName = version
     }
+    signingConfigs {
+        // Scadify: same committed debug keystore as the phone app (the Data Layer links only
+        // same-signature apps), so CI debug builds of both share one stable signature.
+        create("stableDebug") {
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
     buildTypes {
-        debug { applicationIdSuffix = ".dev" }
+        debug {
+            applicationIdSuffix = ".dev"
+            signingConfig = signingConfigs.getByName("stableDebug")
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
