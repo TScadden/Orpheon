@@ -16,7 +16,7 @@ import java.util.UUID
  * One song of an imported playlist: a snapshot of a catalog song (its Spotify track id,
  * the names and the cover as the source listed them), not a phone file — so it is not a
  * [LocalItem]. It plays through the audio-source extensions like any catalog song.
- * [key]: this row's own id (a playlist can hold the same song twice).
+ * [key]: this row's own id (rows are taken out by key).
  */
 data class ImportedSong(
     val key: String,
@@ -35,6 +35,8 @@ data class ImportedPlaylist(
     val sourceUrl: String,
     val items: List<ImportedSong>,
     val createdAt: Long,
+    /** The user's own cover picture: a file in the app's covers folder, "" for the songs' own art. */
+    val cover: String = "",
 )
 
 /**
@@ -77,18 +79,44 @@ object ImportedPlaylists {
         return playlists[id]
     }
 
-    /** Keeps an imported list: every song gets its own row key here. */
+    /**
+     * Keeps an imported list: every song gets its own row key here. A song is in a playlist
+     * at most once (the store's rule, as in [LocalPlaylists]): a source list that names the
+     * same track twice imports it once, first listing first; a song with no track id cannot
+     * be told apart from another, so it is always kept.
+     */
     fun create(name: String, sourceUrl: String, songs: List<ImportedSong>): ImportedPlaylist {
+        val seen = HashSet<String>()
+        val once = songs.filter { it.spotifyTrackId.isBlank() || seen.add(it.spotifyTrackId) }
         val p = ImportedPlaylist(
             UUID.randomUUID().toString(), name.trim(), sourceUrl,
-            songs.map { it.copy(key = UUID.randomUUID().toString()) }, System.currentTimeMillis(),
+            once.map { it.copy(key = UUID.randomUUID().toString()) }, System.currentTimeMillis(),
         )
         update { playlists[p.id] = p }
         return p
     }
 
     fun rename(id: String, name: String) = update { playlists[id]?.let { playlists[id] = it.copy(name = name.trim()) } }
-    fun delete(id: String) = update { playlists.remove(id) }
+
+    fun delete(id: String) = update {
+        playlists.remove(id)?.let { PlaylistCovers.delete(it.cover) }
+    }
+
+    /** Points the playlist at its own cover picture (a file in the covers folder). */
+    fun setCover(id: String, path: String) = update {
+        playlists[id]?.let { p ->
+            if (p.cover != path) PlaylistCovers.delete(p.cover)
+            playlists[id] = p.copy(cover = path)
+        }
+    }
+
+    /** Back to the songs' own art: the cover file goes with the field. */
+    fun clearCover(id: String) = update {
+        playlists[id]?.let { p ->
+            PlaylistCovers.delete(p.cover)
+            playlists[id] = p.copy(cover = "")
+        }
+    }
 
     /** Takes one row out (by its own key, so a repeated song loses only the tapped copy). */
     fun remove(id: String, key: String) =
@@ -117,6 +145,7 @@ object ImportedPlaylists {
         val lists = JSONArray()
         playlists.values.forEach { p ->
             lists.put(JSONObject().put("id", p.id).put("name", p.name).put("source", p.sourceUrl).put("created", p.createdAt)
+                .put("cover", p.cover)
                 .put("items", JSONArray().apply { p.items.forEach { put(songJson(it)) } }))
         }
         return JSONObject().put("version", VERSION).put("playlists", lists).toString()
@@ -130,7 +159,7 @@ object ImportedPlaylists {
             val p = lists.getJSONObject(i)
             val a = p.optJSONArray("items")
             val songs = (0 until (a?.length() ?: 0)).mapNotNull { runCatching { songOf(a!!.getJSONObject(it)) }.getOrNull() }
-            playlists[p.getString("id")] = ImportedPlaylist(p.getString("id"), p.optString("name"), p.optString("source"), songs, p.optLong("created"))
+            playlists[p.getString("id")] = ImportedPlaylist(p.getString("id"), p.optString("name"), p.optString("source"), songs, p.optLong("created"), p.optString("cover"))
         }
     }
 }
