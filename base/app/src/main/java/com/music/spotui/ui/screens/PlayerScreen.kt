@@ -1562,16 +1562,21 @@ fun openNowPlayingAlbum(playerViewModel: PlayerViewModel, singer: String, scope:
     val albumId = song.albumId
     val albumName = playerViewModel.currentSongAlbum.value.ifBlank { song.album }
     @Suppress("NAME_SHADOWING") val singer = singer.ifBlank { song.singer }
-    // A phone file playing (a positive MediaStore id under "local:"): its album is
-    // the phone's files of that name, never a catalog match on the name. Downloads
-    // and radio wrap as local tracks too, with ids below zero — they keep the
-    // catalog route below.
-    val npUri = SongPlayer.nowPlaying.value.uri
-    val localFileId = npUri.removePrefix("local:").toLongOrNull()
-    if (npUri.startsWith("local:") && localFileId != null && localFileId > 0) {
-        if (albumName.isNotBlank()) navigate(com.music.spotui.ui.navigation.localAlbumRoute(singer, albumName))
-        else android.widget.Toast.makeText(com.music.spotui.di.Graph.app, R.string.local_no_album, android.widget.Toast.LENGTH_SHORT).show()
-        return
+    // A phone file playing: its album is the phone's files of that name, never a
+    // catalog match on the name — however it was started. Judged as the songs'
+    // menus judge it (LocalAlbums.albumTap): a playlist's or Liked Songs' row
+    // carries a "local:content://…" address, which the bare-id test this replaces
+    // missed, so those files fell through to the catalog route. Downloads and
+    // radio keep the catalog route below.
+    when (com.music.spotui.data.local.LocalAlbums.albumTap(song.url, song.spotifyTrackId, SongPlayer.nowPlaying.value.uri, albumName)) {
+        com.music.spotui.data.local.LocalAlbums.AlbumTap.LOCAL -> {
+            navigate(com.music.spotui.ui.navigation.localAlbumRoute(singer, albumName)); return
+        }
+        com.music.spotui.data.local.LocalAlbums.AlbumTap.LOCAL_NO_ALBUM -> {
+            android.widget.Toast.makeText(com.music.spotui.di.Graph.app, R.string.local_no_album, android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        com.music.spotui.data.local.LocalAlbums.AlbumTap.CATALOG -> Unit
     }
     if (albumId.isNotBlank()) { navigate(albumRoute(albumName, singer, albumId)); return }
     val trackId = SongPlayer.currentTrackId

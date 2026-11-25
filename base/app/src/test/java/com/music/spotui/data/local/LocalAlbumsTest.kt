@@ -59,6 +59,86 @@ class LocalAlbumsTest {
         assertEquals(listOf(blank), LocalAlbums.tracksFor(listOf(blank, named), ""))
     }
 
+    // The player's "go to album" (LocalAlbums.albumTap): a phone file reaches
+    // its own album page however it was started; downloads and catalog songs
+    // keep the catalog route. Tyson's report, Nov 25 2026: "Not Fair" played
+    // from his playlist (album "Laroi unreleased") landed on a catalog album.
+    @Test fun albumTapSendsAPlaylistFilesRowToItsLocalAlbum() {
+        // The queue row of a file played from a local playlist or Liked Songs:
+        // a "local:content://…" play address and no Spotify id behind it.
+        assertEquals(
+            LocalAlbums.AlbumTap.LOCAL,
+            LocalAlbums.albumTap(
+                url = "local:content://media/external/audio/media/123",
+                spotifyTrackId = "",
+                nowPlayingUri = "local:content://media/external/audio/media/123",
+                albumName = "Laroi unreleased",
+            ),
+        )
+    }
+
+    @Test fun albumTapKeepsTheBareIdFormLocal() {
+        // A file played straight from the files or an album page: no queue row
+        // to judge by, the player's own address is the bare MediaStore id form.
+        assertEquals(
+            LocalAlbums.AlbumTap.LOCAL,
+            LocalAlbums.albumTap(url = "", spotifyTrackId = "", nowPlayingUri = "local:123", albumName = "Laroi unreleased"),
+        )
+        assertEquals(
+            LocalAlbums.AlbumTap.LOCAL,
+            LocalAlbums.albumTap(
+                url = "local:content://media/external/audio/media/123",
+                spotifyTrackId = "", nowPlayingUri = "local:123", albumName = "Laroi unreleased",
+            ),
+        )
+    }
+
+    @Test fun albumTapKeepsACatalogSongOnTheCatalogRoute() {
+        assertEquals(
+            LocalAlbums.AlbumTap.CATALOG,
+            LocalAlbums.albumTap(
+                url = "spotify:track:4uLU6hMCjMI75M1A2tKUQC",
+                spotifyTrackId = "4uLU6hMCjMI75M1A2tKUQC",
+                nowPlayingUri = "spotify:track:4uLU6hMCjMI75M1A2tKUQC",
+                albumName = "F*CK LOVE 3+: OVER YOU",
+            ),
+        )
+    }
+
+    @Test fun albumTapKeepsADownloadOnTheCatalogRoute() {
+        // A download wraps as a local track too, but its row carries its
+        // Spotify id and its own address's id is below zero: catalog route.
+        assertEquals(
+            LocalAlbums.AlbumTap.CATALOG,
+            LocalAlbums.albumTap(
+                url = "local:file:///data/user/0/app.orpheon.beta.clean/files/offline/song.mp3",
+                spotifyTrackId = "4uLU6hMCjMI75M1A2tKUQC",
+                nowPlayingUri = "local:-12345",
+                albumName = "F*CK LOVE 3+: OVER YOU",
+            ),
+        )
+        assertEquals(
+            LocalAlbums.AlbumTap.CATALOG,
+            LocalAlbums.albumTap(url = "", spotifyTrackId = "", nowPlayingUri = "local:-12345", albumName = "Anything"),
+        )
+    }
+
+    @Test fun albumTapNamesNoAlbumForAFileWithoutOne() {
+        assertEquals(
+            LocalAlbums.AlbumTap.LOCAL_NO_ALBUM,
+            LocalAlbums.albumTap(
+                url = "local:content://media/external/audio/media/123",
+                spotifyTrackId = "",
+                nowPlayingUri = "local:content://media/external/audio/media/123",
+                albumName = "",
+            ),
+        )
+        assertEquals(
+            LocalAlbums.AlbumTap.LOCAL_NO_ALBUM,
+            LocalAlbums.albumTap(url = "", spotifyTrackId = "", nowPlayingUri = "local:123", albumName = ""),
+        )
+    }
+
     @Test fun sharedArtistNamesTheOneArtistEveryTrackShares() {
         val all = listOf(track(1, "The Kid Laroi", "X"), track(2, "The Kid Laroi", "X"))
         assertEquals("The Kid Laroi", LocalAlbums.sharedArtist(all))
