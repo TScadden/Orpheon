@@ -35,7 +35,7 @@ class PlaylistImportTest {
             {"title":"Broken row","subtitle":"Nobody","duration":1000}
           ]}},
           "settings":{"session":{"accessToken":"tok123"}}
-        }}}
+        }}}}
     """.trimIndent()
 
     @Test fun embedPageParsesAndCountsTheBrokenRow() {
