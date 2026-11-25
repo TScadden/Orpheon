@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.QrCode2
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -96,9 +97,10 @@ private fun ShareRow(icon: ImageVector, label: String, detail: String? = null, e
 }
 
 /**
- * "Share" on a playlist of this phone: what it costs (the file's size, said plainly
- * before anything is packed) and the one way out phase 1 has — as a file. The QR /
- * same-Wi-Fi choice joins this sheet in phase 2.
+ * "Share" on a playlist of this phone: two ways out — as a file (what it costs said
+ * plainly before anything is packed), or by QR code on the same Wi-Fi, where this
+ * phone hands the songs straight to the one that scans. Sending by code only reads
+ * this phone's songs, so it asks nothing of Android the file's import does.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,7 +108,9 @@ fun SharePlaylistSheet(playlist: LocalPlaylist, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var building by remember { mutableStateOf(false) }
+    var byQr by remember { mutableStateOf(false) }
     var size by remember { mutableStateOf<Long?>(null) }
+    if (byQr) ShareQrSheet(playlist) { byQr = false }
     LaunchedEffect(playlist.id, playlist.items.size) {
         size = withContext(Dispatchers.IO) { ShareExport.totalSize(context, playlist).takeIf { it >= 0 } }
     }
@@ -116,6 +120,10 @@ fun SharePlaylistSheet(playlist: LocalPlaylist, onDismiss: () -> Unit) {
                 stringResource(R.string.share_playlist), color = AppText, fontSize = 18.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(20.dp, 4.dp, 20.dp, 8.dp),
             )
+            ShareRow(
+                Icons.Outlined.QrCode2, stringResource(R.string.share_by_qr),
+                stringResource(R.string.share_by_qr_detail),
+            ) { byQr = true }
             if (!ShareImport.supported) {
                 Text(
                     stringResource(R.string.share_needs_newer_android), color = AppMuted, fontSize = 14.sp,

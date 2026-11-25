@@ -149,6 +149,8 @@ class MainActivity : AppCompatActivity() {
                         if (signedIn) com.music.spotui.pass.PassLinkHost()
                         // A playlist file opened with the app or shared to it: its import confirmation.
                         if (signedIn) com.music.spotui.share.ShareImportHost()
+                        // A share QR code scanned with the camera: the question before receiving its playlist.
+                        if (signedIn) com.music.spotui.share.ShareLinkHost()
                         // "Ask each time": the download quality question, above every screen.
                         com.music.spotui.ui.components.DownloadAskHost()
                         // An extension asking the user's yes before a change.
@@ -358,6 +360,9 @@ class MainActivity : AppCompatActivity() {
                     return
                 }
                 val link = intent.data?.toString() ?: return
+                // A share QR code opened by the camera (orpheon://share?…): its question, never a receive on its own.
+                // The share takes its own links first — the pass would claim any orpheon: link otherwise.
+                if (com.music.spotui.share.ShareLinks.offer(this, link, signedIn)) return
                 // A pass QR code opened by the camera (orpheon://pass?…): its confirmation, never a send on its own.
                 com.music.spotui.pass.PassLinks.offer(this, link, signedIn)
             }
