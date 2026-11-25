@@ -237,11 +237,14 @@ private fun ArtistOverviewContent(
     var following by remember(overview.id) { mutableStateOf(false) }
     // An artist of another provider (its id a whole uri): Spotify cannot follow it; its page reads, its songs play.
     val onSpotify = !overview.id.contains(':')
+    // The artist's own uri, for the follow: the whole uri for a catalog artist,
+    // a spotify:artist: uri for a Spotify one. Under the no-account platform the
+    // follow is kept on this phone (LocalFollows), for either kind.
+    val artistUri = if (overview.id.contains(':')) overview.id else "spotify:artist:${overview.id}"
     LaunchedEffect(overview.id) {
-        if (!onSpotify) return@LaunchedEffect
-        val uris = tracks.map { "spotify:track:${it.song.spotifyTrackId}" } + "spotify:artist:${overview.id}"
+        val uris = tracks.map { "spotify:track:${it.song.spotifyTrackId}" } + artistUri
         val res = SongPlayer.libraryContains(uris)
-        following = "spotify:artist:${overview.id}" in res
+        following = artistUri in res
     }
     // The user's liked songs by this artist: from the session cache, else loaded once in the background.
     var likedByArtist by remember(overview.id) { mutableStateOf<List<SongsModel>>(emptyList()) }
@@ -259,7 +262,7 @@ private fun ArtistOverviewContent(
     val isThisArtist = np.contextUri == "spotify:artist:${overview.id}"
     val playingNow = artistViewModel.currentSongPlayingState.value
     val currentSongId = artistViewModel.currentSongId.value
-    val isFollowing = SongPlayer.library["spotify:artist:${overview.id}"] ?: following
+    val isFollowing = SongPlayer.library[artistUri] ?: following
     val listState = rememberLazyListState()
 
     fun playTrackAt(index: Int) {
@@ -352,14 +355,13 @@ private fun ArtistOverviewContent(
                         iconScale = PLAY_ICON_SCALE,
                         containerColor = Color.White,
                     )
-                    if (onSpotify) ImmersiveCircleButton(
+                    ImmersiveCircleButton(
                         icon = if (isFollowing) Icons.Rounded.Check else Icons.Rounded.PersonAdd,
                         contentDescription = stringResource(if (isFollowing) R.string.immersive_detail_unfollow else R.string.immersive_detail_follow),
                         onClick = {
-                            val on = !(SongPlayer.library["spotify:artist:${overview.id}"] ?: following)
+                            val on = !(SongPlayer.library[artistUri] ?: following)
                             following = on
-                            com.music.spotui.di.Haptics.toggle(on)
-                            SongPlayer.setSaved("spotify:artist:${overview.id}", on)
+                            SongPlayer.setArtistSaved(artistUri, on, displayName, overview.avatarImage.ifBlank { overview.headerImage })
                         },
                         tint = if (isFollowing) Immersive.Accent else Immersive.Text,
                         size = SideButton,

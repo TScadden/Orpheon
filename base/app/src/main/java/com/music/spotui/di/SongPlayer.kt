@@ -2312,14 +2312,17 @@ object SongPlayer {
         val (known, unknown) = uris.partition { library.containsKey(it) && now - (savedAt[it] ?: 0L) < SAVED_FRESH_MS }
         val out = known.filterTo(mutableSetOf()) { library[it] == true }
         if (unknown.isEmpty()) return LibraryCheck(out, emptySet(), false)
-        val flags = savedFlags(unknown) ?: return LibraryCheck(out, emptySet(), true)
-        // A catalog song liked on this phone (CatalogLikes) is saved whatever the
-        // platform's library answers — it keeps nothing, so its answer is always no.
+        // What this phone itself keeps (a catalog song's like, an artist's follow)
+        // is saved whatever the platform's library answers — it keeps nothing, so
+        // its answer is always no; when it cannot answer at all, the phone's own
+        // answer is still true.
+        fun locallySaved(uri: String): Boolean = com.music.spotui.data.local.CatalogLikes.localOnly && (
+            (uri.startsWith(SPOTIFY_TRACK_PREFIX) && com.music.spotui.data.local.CatalogLikes.isLiked(trackIdOf(uri))) ||
+                (uri.contains(":artist:") && com.music.spotui.data.local.LocalFollows.isFollowed(uri))
+            )
+        val flags = savedFlags(unknown) ?: return LibraryCheck(out + unknown.filter { locallySaved(it) }, emptySet(), true)
         val saved = unknown.filterIndexed { i, _ -> flags.getOrNull(i) == true }.toSet() +
-            unknown.filter {
-                it.startsWith(SPOTIFY_TRACK_PREFIX) && com.music.spotui.data.local.CatalogLikes.localOnly &&
-                    com.music.spotui.data.local.CatalogLikes.isLiked(trackIdOf(it))
-            }
+            unknown.filter { locallySaved(it) }
         main.post {
             for (u in unknown) {
                 if (u == intentUri && SystemClock.elapsedRealtime() < intentUntil) continue
@@ -2387,8 +2390,38 @@ object SongPlayer {
         setSaved(SPOTIFY_TRACK_PREFIX + trackId, on)
     }
 
+    /**
+     * Follow / unfollow an artist, with its name and picture: under the no-account
+     * platform the follow is kept on this phone (LocalFollows) with that snapshot,
+     * so the Library's Artists list can show it. With a real account library it is
+     * the plain [setSaved] it always was.
+     */
+    fun setArtistSaved(uri: String, on: Boolean, name: String, image: String) {
+        if (com.music.spotui.data.local.CatalogLikes.localOnly) {
+            setArtistSavedLocal(uri, on, name, image)
+            return
+        }
+        setSaved(uri, on)
+    }
+
+    private fun setArtistSavedLocal(uri: String, on: Boolean, name: String, image: String) {
+        Haptics.toggle(on)
+        if (on) com.music.spotui.data.local.LocalFollows.set(
+            com.music.spotui.data.local.FollowedArtist(uri, name, image, System.currentTimeMillis()), true)
+        else com.music.spotui.data.local.LocalFollows.remove(uri)
+        onLibraryItem(uri, on)
+    }
+
     /** Save / remove any item (album, playlist, track, artist, show, episode) in the user's library. */
     fun setSaved(uri: String, on: Boolean) {
+        // An artist's follow under the no-account platform lives on this phone
+        // (LocalFollows), like a catalog song's like: the platform library refuses
+        // it and the tap only failed. Callers holding the artist's name and picture
+        // use setArtistSaved, which keeps the fuller snapshot.
+        if (uri.contains(":artist:") && com.music.spotui.data.local.CatalogLikes.localOnly) {
+            setArtistSavedLocal(uri, on, "", "")
+            return
+        }
         intentUri = uri
         intentValue = on
         intentUntil = SystemClock.elapsedRealtime() + 3000
