@@ -184,7 +184,7 @@ object ExtensionAudio {
                 if (!warming.add(s.spotifyTrackId)) return@forEach
                 try {
                     val a = withContext(Dispatchers.IO) {
-                        Extensions.audio(Extensions.trackInfo(s.spotifyTrackId, s.title, s.singer, s.album, s.durationMs.toLong(), s.coverUri), timeoutMs = Extensions.PICK_AUDIO_MS)
+                        Extensions.audio(Extensions.trackInfo(s.spotifyTrackId, s.title, s.singer, s.album, s.durationMs.toLong(), s.coverUri, s.isrc), timeoutMs = Extensions.PICK_AUDIO_MS)
                     } ?: return@forEach
                     keep(s.spotifyTrackId, a)
                     a.manifest?.let { m ->
@@ -280,7 +280,7 @@ object ExtensionAudio {
             // was not asked. It is asked again once started (reported: a resume after a relaunch went to
             // Spotify, and the song was then held there for the whole session).
             val wasStarting = Extensions.starting()
-            val info = Extensions.trackInfo(picked.spotifyTrackId, picked.title, picked.singer, picked.album, picked.durationMs.toLong(), picked.coverUri)
+            val info = Extensions.trackInfo(picked.spotifyTrackId, picked.title, picked.singer, picked.album, picked.durationMs.toLong(), picked.coverUri, picked.isrc)
             val ask = if (cached != null) null else late.async {
                 Extensions.audio(info, timeoutMs = Extensions.AUDIO_MS)
                     ?: if (wasStarting && Extensions.awaitStarted(START_WAIT_MS)) Extensions.audio(info, timeoutMs = Extensions.AUDIO_MS) else null

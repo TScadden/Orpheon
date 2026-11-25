@@ -7,6 +7,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OfflineDownloaderTest {
+    @Test fun aDownloadRequestKeepsItsIsrcAsText() {
+        val r = OfflineDownloader.Request(
+            trackId = "AAA", title = "One", artist = "Artist A", album = "Alb",
+            albumId = "", durationMs = 201_000L, coverUrl = "", isrc = "USS1Z2500001",
+        )
+        val again = OfflineDownloader.Request.fromJson(r.toJson())
+        assertEquals("USS1Z2500001", again.isrc)
+        // A request saved before the ISRC was kept (no key) reads as unknown, not a crash.
+        val old = OfflineDownloader.Request.fromJson(org.json.JSONObject(
+            """{"id":"AAA","title":"One","artist":"Artist A","album":"Alb","albumId":"","duration":201000,"cover":""}""",
+        ))
+        assertEquals("", old.isrc)
+    }
+
     private fun flacHeader(rate: Int = 44_100, depth: Int = 16, channels: Int = 2, seconds: Int = 200): ByteArray {
         val head = ByteArray(42)
         "fLaC".toByteArray(Charsets.US_ASCII).copyInto(head)

@@ -17,6 +17,10 @@ data class SongsModel(
     val durationMs : Int = 0,
     // Spotify album id of the track, when known (opens the album page by id).
     val albumId : String = "",
+    // The recording's ISRC, when the row's own source carried it (an imported playlist's
+    // Spotify read does): playback and downloads match sources by it directly instead of
+    // looking it up live. Empty on rows whose source never stated it, and in older caches.
+    val isrc : String = "",
     // When it was added to the playlist or to Liked Songs (ISO 8601), for "Sort by date added".
     val addedAt : String = "",
     // False when Spotify marks the track unavailable (region, removed); rows are dimmed.

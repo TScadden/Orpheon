@@ -1,5 +1,6 @@
 package com.music.spotui.data.api
 
+import com.music.spotui.data.local.ImportedSong
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -56,6 +57,87 @@ class PlaylistImportTest {
         assertEquals("Evening Mix", SpotifyEmbed.parse(html)?.name)
         assertNull(SpotifyEmbed.parse("<html><body>no data here</body></html>"))
         assertNull(SpotifyEmbed.parseData(JSONObject("""{"props":{"pageProps":{}}}""")))
+    }
+
+    @Test fun apiPageCarriesTheIsrcNormalized() {
+        val page = SpotifyEmbed.parseApiPage(JSONObject("""
+            {"total":2,"items":[
+              {"track":{"id":"AAA","name":"One","duration_ms":201000,
+                 "artists":[{"name":"Artist A"}],
+                 "album":{"name":"Alb","images":[]},
+                 "external_ids":{"isrc":"us-s1z-25-00001"}}},
+              {"track":{"id":"BBB","name":"Two","duration_ms":182000,"artists":[{"name":"Artist B"}],"album":{"name":"Other","images":[]}}}
+            ]}
+        """.trimIndent()))
+        // The ISRC the API states, normalized as everywhere else in the app; a track
+        // whose record carries none reads as "".
+        assertEquals("USS1Z2500001", page.tracks[0].isrc)
+        assertEquals("", page.tracks[1].isrc)
+    }
+
+    private fun song(id: String, title: String, artist: String, album: String = "", cover: String = "", isrc: String = "") =
+        ImportedSong("", id, title, artist, album, 100_000L, cover, isrc)
+
+    @Test fun aPartialApiReadCompletesOnlyTheSongsItReturned() {
+        // The reported failure: the API's reading came back shorter than the embed's and
+        // the old either/or threw its covers and album names away with the rest.
+        val embed = listOf(
+            song("AAA", "One", "Artist A"),
+            song("BBB", "Two", "Artist B"),
+            song("CCC", "Three", "Artist C"),
+        )
+        val api = listOf(song("BBB", "Two", "Artist B", album = "Alb", cover = "https://img/2", isrc = "USS1Z2500001"))
+        val merged = SpotifyEmbed.mergeReads(embed, api)
+        assertEquals(listOf("AAA", "BBB", "CCC"), merged.map { it.spotifyTrackId })
+        assertEquals("", merged[0].album)
+        assertEquals("", merged[0].coverUrl)
+        assertEquals("Alb", merged[1].album)
+        assertEquals("https://img/2", merged[1].coverUrl)
+        assertEquals("USS1Z2500001", merged[1].isrc)
+        assertEquals("", merged[2].album)
+        assertEquals("", merged[2].isrc)
+    }
+
+    @Test fun anEmbedOnlyReadIsUnchanged() {
+        val embed = listOf(song("AAA", "One", "Artist A"), song("BBB", "Two", "Artist B"))
+        assertEquals(embed, SpotifyEmbed.mergeReads(embed, emptyList()))
+    }
+
+    @Test fun anApiOnlyReadIsUnchanged() {
+        val api = listOf(song("AAA", "One", "Artist A", album = "Alb", cover = "https://img/1"))
+        assertEquals(api, SpotifyEmbed.mergeReads(emptyList(), api))
+    }
+
+    @Test fun songsOnlyTheApiReachedAreAppendedInApiOrder() {
+        val embed = listOf(song("AAA", "One", "Artist A"), song("BBB", "Two", "Artist B"))
+        val api = listOf(
+            song("CCC", "Three", "Artist C", album = "Third"),
+            song("BBB", "Two", "Artist B", album = "Alb"),
+            song("DDD", "Four", "Artist D", album = "Fourth"),
+        )
+        val merged = SpotifyEmbed.mergeReads(embed, api)
+        assertEquals(listOf("AAA", "BBB", "CCC", "DDD"), merged.map { it.spotifyTrackId })
+        assertEquals("Alb", merged[1].album)
+    }
+
+    @Test fun aDuplicateInTheApiReadCompletesOnceAndAddsNoRow() {
+        val embed = listOf(song("AAA", "One", "Artist A"), song("BBB", "Two", "Artist B"))
+        val api = listOf(
+            song("BBB", "Two", "Artist B", cover = "first"),
+            song("BBB", "Two", "Artist B", cover = "second"),
+        )
+        val merged = SpotifyEmbed.mergeReads(embed, api)
+        assertEquals(2, merged.size)
+        assertEquals("first", merged[1].coverUrl)
+    }
+
+    @Test fun aSongIsMatchedByNameWhenItsIdIsMissing() {
+        val embed = listOf(song("", "Two", "Artist B"))
+        val api = listOf(song("BBB", "two", "artist b", album = "Alb"))
+        val merged = SpotifyEmbed.mergeReads(embed, api)
+        assertEquals(1, merged.size)
+        assertEquals("BBB", merged[0].spotifyTrackId)
+        assertEquals("Alb", merged[0].album)
     }
 
     @Test fun apiPageParsesSkipsRemovedAndKeepsTotal() {

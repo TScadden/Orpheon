@@ -1339,7 +1339,7 @@ object SongPlayer {
         app.myspoti.host.android.Logbook.log("audio: ${song.title} asked to $id, picked in the player")
         scope.launch {
             val stream = runCatching {
-                ext.audioFrom(id, ext.trackInfo(trackId, song.title, song.singer, song.album, song.durationMs.toLong(), song.coverUri))
+                ext.audioFrom(id, ext.trackInfo(trackId, song.title, song.singer, song.album, song.durationMs.toLong(), song.coverUri, song.isrc))
             }.getOrNull()
             main.post {
                 if (stream == null) { done(SourceSwitch.MISSING); return@post }

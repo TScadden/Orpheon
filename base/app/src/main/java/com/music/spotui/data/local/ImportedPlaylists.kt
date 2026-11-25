@@ -26,6 +26,10 @@ data class ImportedSong(
     val album: String,
     val durationMs: Long,
     val coverUrl: String,
+    /** The recording's ISRC, when the source's read carried it (the Spotify API does, the
+     * embed page does not): playback and downloads match sources by it, no lookup needed.
+     * "" when unknown — playlists stored before it was kept read as "". */
+    val isrc: String = "",
 )
 
 /** A playlist brought in from a public link (see PlaylistImport), kept on this phone only. */
@@ -122,6 +126,26 @@ object ImportedPlaylists {
     fun remove(id: String, key: String) =
         update { playlists[id]?.let { playlists[id] = it.copy(items = it.items.filterNot { s -> s.key == key }) } }
 
+    /**
+     * Fills the ISRCs of a stored playlist's songs from [isrcByTrackId] (Spotify track id →
+     * ISRC): only songs that have none are filled — a song that already carries one keeps
+     * it, and a song the map does not know is left as it is. For playlists imported before
+     * imports kept ISRCs (see Api's backfill on the playlist page). How many were filled.
+     */
+    fun fillIsrcs(id: String, isrcByTrackId: Map<String, String>): Int {
+        var filled = 0
+        update {
+            playlists[id]?.let { p ->
+                val items = p.items.map { s ->
+                    val found = isrcByTrackId[s.spotifyTrackId]?.takeIf { it.isNotBlank() }
+                    if (s.isrc.isBlank() && found != null) { filled++; s.copy(isrc = found) } else s
+                }
+                if (filled > 0) playlists[id] = p.copy(items = items)
+            }
+        }
+        return filled
+    }
+
     private fun update(change: () -> Unit) {
         synchronized(lock) {
             ensureLoaded()
@@ -137,9 +161,10 @@ object ImportedPlaylists {
 
     private fun songJson(s: ImportedSong) = JSONObject().put("key", s.key).put("track", s.spotifyTrackId)
         .put("title", s.title).put("artist", s.artist).put("album", s.album).put("duration", s.durationMs).put("cover", s.coverUrl)
+        .put("isrc", s.isrc)
 
     private fun songOf(o: JSONObject) = ImportedSong(o.getString("key"), o.getString("track"), o.optString("title"),
-        o.optString("artist"), o.optString("album"), o.optLong("duration"), o.optString("cover"))
+        o.optString("artist"), o.optString("album"), o.optLong("duration"), o.optString("cover"), o.optString("isrc"))
 
     internal fun write(): String {
         val lists = JSONArray()
