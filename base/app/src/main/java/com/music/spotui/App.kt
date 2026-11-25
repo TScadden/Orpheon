@@ -175,7 +175,7 @@ private fun UpdatePrompt() {
     val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     androidx.compose.runtime.LaunchedEffect(owner) {
         // Each time the app comes to the foreground (the check itself skips when the last one is
-        // under an hour old), then every 6 h while it stays open. Turned off in Settings: no
+        // under 3 hours old), then every 3 h while it stays open. Turned off in Settings: no
         // automatic check; the manual one there still asks.
         owner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
             while (true) {

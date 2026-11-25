@@ -20,7 +20,10 @@ import java.util.concurrent.TimeUnit
 /**
  * Downloads a release's APK and installs it over this app with Android's package
  * installer: the system asks the user to confirm, nothing opens in a browser.
- * The APK is signed with the same key as the installed app, or Android refuses it.
+ * The download address must pass [UpdateDownloadPolicy] (this project's own GitHub
+ * repositories, and GitHub's asset hosts on the hops between), and the downloaded
+ * APK must pass [trustedUpdate] (this package, the release's version, this app's
+ * signing certificate) before the installer is opened.
  */
 object AppUpdater {
     sealed interface State {
@@ -43,7 +46,15 @@ object AppUpdater {
 
     private const val ACTION = "app.myspoti.UPDATE_STATUS"
     private val http by lazy {
-        OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
+        OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS)
+            // Every hop of the download (the first address and each redirect) must be one
+            // UpdateDownloadPolicy trusts; a redirect anywhere else fails the download.
+            .addNetworkInterceptor(okhttp3.Interceptor { chain ->
+                val url = chain.request().url.toString()
+                if (!UpdateDownloadPolicy.isDownloadHop(url)) throw java.io.IOException("untrusted download address")
+                chain.proceed(chain.request())
+            })
+            .build()
     }
 
     /** Android lets this app install packages (the "Install unknown apps" switch). */
@@ -62,9 +73,11 @@ object AppUpdater {
         val app = context.applicationContext
         if (!canInstall(app)) { _state.value = State.NeedsPermission; return }
         _state.value = State.Downloading(-1f)
-        val apk = File(File(app.cacheDir, "updates"), "myspoti-${release.version}.apk")
+        val apk = File(File(app.cacheDir, "updates"), "scadify-${release.version}.apk")
         val result = runCatching {
             download(release, apk)
+            // Not this app, not the release's version, or signed with another key: not installed.
+            if (!trustedUpdate(app, apk, release.version)) throw java.io.IOException("the downloaded file is not a Scadify update signed like this app")
             install(app, apk)
         }
         // The installer session holds its own copy once committed; a failed download left a partial one.
@@ -77,16 +90,15 @@ object AppUpdater {
 
     fun reset() { _state.value = State.Idle }
 
-    /** No release of this app comes near it; a bigger answer is not an APK of ours. */
-    private const val MAX_APK_BYTES = 200L * 1024 * 1024
-
     private suspend fun download(release: UpdateChecker.Release, file: File): Unit = withContext(Dispatchers.IO) {
+        require(UpdateDownloadPolicy.isReleaseAssetUrl(release.apkUrl)) { "untrusted download address" }
+        if (release.sizeBytes > UpdateDownloadPolicy.MAX_APK_BYTES) throw java.io.IOException("the download is too big (${release.sizeBytes} bytes)")
         val dir = file.parentFile!!.apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }
         http.newCall(Request.Builder().url(release.apkUrl).build()).execute().use { r ->
             if (!r.isSuccessful) throw java.io.IOException("HTTP ${r.code}")
             val total = r.body.contentLength()
-            if (total > MAX_APK_BYTES) throw java.io.IOException("the download is too big ($total bytes)")
+            if (total > UpdateDownloadPolicy.MAX_APK_BYTES) throw java.io.IOException("the download is too big ($total bytes)")
             var done = 0L
             var shown = -1
             r.body.byteStream().use { input ->
@@ -97,7 +109,7 @@ object AppUpdater {
                         if (n < 0) break
                         out.write(buf, 0, n)
                         done += n
-                        if (done > MAX_APK_BYTES) throw java.io.IOException("the download is too big (over $MAX_APK_BYTES bytes)")
+                        if (done > UpdateDownloadPolicy.MAX_APK_BYTES) throw java.io.IOException("the download is too big (over ${UpdateDownloadPolicy.MAX_APK_BYTES} bytes)")
                         if (total > 0) {
                             val pct = (done * 100 / total).toInt()
                             if (pct != shown) { shown = pct; _state.value = State.Downloading(pct / 100f) }
@@ -124,7 +136,7 @@ object AppUpdater {
         var committed = false
         try {
             installer.openSession(id).use { session ->
-                session.openWrite("myspoti.apk", 0, apk.length()).use { out ->
+                session.openWrite("scadify.apk", 0, apk.length()).use { out ->
                     apk.inputStream().use { it.copyTo(out) }
                     session.fsync(out)
                 }

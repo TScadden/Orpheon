@@ -19,11 +19,11 @@ val automixLab = findProperty("automixLab") != null
 val cleanApp = findProperty("clean") != null
 
 
-/** The ABIs a release has an APK for, and how they are named in it (UpdateChecker reads the same names). */
+/** The ABIs a release has an APK for, and how they are named in it (the release workflow's collectApks). */
 val RELEASE_ABIS = listOf("arm64-v8a", "armeabi-v7a")
 val ABI_NAMES = mapOf("arm64-v8a" to "ARMv8", "armeabi-v7a" to "ARMv7")
 /**
- * The first word of a release's APK names (UpdateChecker reads it from BuildConfig.APK_NAME). It
+ * The first word of a release's APK names (kept in BuildConfig as APK_NAME). It
  * follows the app id: Myspoti's own releases (app.myspoti, app.myspoti.stable) are "Myspoti-...",
  * so their update check, which installs only its own package, opens the release page for these
  * instead of trying an APK it cannot install over itself.
@@ -54,7 +54,11 @@ android {
     // Scadify is this fork's display name only: the ids stay, so installs and the
     // extension store are unaffected. Origin: Orpheon/Myspoti by kota-zo, GPL-3.0.)
     // Local builds (no version given) are on the beta side, like the phone test builds.
-    val version = (findProperty("appVersionName") as String?) ?: "1.0.0"
+    // Scadify's own numbering: the default is the current shipped build's number ("14" =
+    // v14). The in-app updater compares versionNames numerically and requires the release's
+    // APK to carry the release's number, so bump this default (and the versionCode default
+    // below, 200 + the number) with every shipped version.
+    val version = (findProperty("appVersionName") as String?) ?: "14"
     // "-beta" as in UpdateChecker.isBeta, one predicate for the app id, the label and the log stripping.
     val beta = findProperty("appVersionName") == null || version.contains("-beta")
     defaultConfig {
@@ -65,7 +69,9 @@ android {
         minSdk = 29
         targetSdk = 36
         // CI release builds pass the tag's version (-PappVersionName / -PappVersionCode).
-        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 200
+        // Scadify's shipped builds take the defaults: 200 + the version number (v14 = 214),
+        // always above the previous build's, so a new APK installs over the old one.
+        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 214
         versionName = version
         // GitHub "owner/repo" whose releases the app checks for updates; empty = off
         // (local builds). CI sets it to the repository it builds.
@@ -127,7 +133,10 @@ android {
             // The clean channel's home-screen label is just "Scadify" (Tyson: no "Clean" suffix in the name).
             manifestPlaceholders["appLabel"] = if (cleanApp) "Scadify" else if (automixLab) "Myspoti Mix Lab" else "Scadify dev"
             manifestPlaceholders["cliEnabled"] = "true"
-            buildConfigField("String", "UPDATE_REPO", "\"\"")
+            // Scadify v14: the clean build IS the shipped app, so its update check is live and
+            // reads the releases-only companion repo. The plain dev build stays off: no
+            // release carries its app id.
+            buildConfigField("String", "UPDATE_REPO", "\"${if (cleanApp) "TScadden/scadify-releases" else ""}\"")
         }
         release {
             // Real key when provided (CI releases); otherwise the debug key, so a local

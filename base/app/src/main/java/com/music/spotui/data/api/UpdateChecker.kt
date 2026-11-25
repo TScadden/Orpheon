@@ -12,17 +12,24 @@ import java.util.concurrent.TimeUnit
 /**
  * New version check against the GitHub releases of [BuildConfig.UPDATE_REPO]
  * (set by the CI build; empty in local builds, which never check).
- * Automatic checks at most once an hour (launch/resume) and every 6 h while open. The release's
- * APK is downloaded and installed in the app ([AppUpdater]).
+ *
+ * Scadify v14: the repo is the releases-only companion TScadden/scadify-releases —
+ * every release there is a Scadify build, numbered like the app itself ("14", "15", …:
+ * the tag is "v14" and the APK's versionName is "14", see app/build.gradle.kts), so the
+ * checker reads GitHub's "latest" directly, the way Tyson's Island's updater does.
+ * Automatic checks run every 3 hours (Tyson's cadence, on by default — see
+ * [com.music.spotui.data.preferences.AutoUpdateCheckPref]). The release's APK is
+ * downloaded and installed in the app ([AppUpdater]), after [UpdateDownloadPolicy]
+ * and [trustedUpdate] have had their say.
  */
 object UpdateChecker {
     /** [apkUrl]: the release's signed APK; blank when the release has none (then its page opens). */
-    data class Release(val version: String, val pageUrl: String, val notes: String = "", val apkUrl: String = "")
+    data class Release(val version: String, val pageUrl: String, val notes: String = "", val apkUrl: String = "", val sizeBytes: Long = 0)
 
-    /** Launch / resume check: not more often than this (releases can come several a day). */
-    const val INTERVAL_MS = 3_600_000L
+    /** Launch / resume check: not more often than this (the 3-hour cadence). */
+    const val INTERVAL_MS = 3 * 3_600_000L
     /** While the app stays open, the check runs again this often. */
-    const val PERIODIC_MS = 6 * 3_600_000L
+    const val PERIODIC_MS = 3 * 3_600_000L
     /** After a failed automatic check (offline, rate limit), wait this long before trying again. */
     private const val RETRY_MS = 10 * 60_000L
     private val http by lazy { OkHttpClient.Builder().callTimeout(10, TimeUnit.SECONDS).addInterceptor(com.music.spotui.data.DataSaver.interceptor).build() }
@@ -84,41 +91,41 @@ object UpdateChecker {
             is Fetch.Ok -> e.putLong("checked_at", now).putLong("tried_at", 0L)
                 .putString("version", result.release?.version).putString("url", result.release?.pageUrl)
                 .putString("notes", result.release?.notes).putString("apk", result.release?.apkUrl)
+                .putLong("size", result.release?.sizeBytes ?: 0L)
         }
         e.apply()
     }
 
     private fun fetch(repo: String, force: Boolean): Fetch = try {
-        // Stable builds follow "latest", which never includes pre-releases. A beta build
-        // reads the list: the newest beta, compared with [isNewer].
-        // Both channels read the list: the repository also carries Myspoti's releases (2.x, whose
-        // "latest" is one of them), never this app's.
-        val bust = if (force) "&_=${System.currentTimeMillis()}" else ""
-        val url = "https://api.github.com/repos/$repo/releases?per_page=20$bust"
+        // "latest" is the newest full release; the releases-only repo carries nothing
+        // else, so no list has to be picked through. (GitHub never serves a pre-release
+        // here, so a beta build finds nothing — Scadify's shipped builds are all on the
+        // stable channel.)
+        val bust = if (force) "?_=${System.currentTimeMillis()}" else ""
+        val url = "https://api.github.com/repos/$repo/releases/latest$bust"
         val request = Request.Builder().url(url).header("Accept", "application/vnd.github+json")
             .apply { if (force) { header("Cache-Control", "no-cache, no-store, max-age=0"); header("Pragma", "no-cache") } }.build()
         http.newCall(request).execute().use { r ->
+            // No release published yet.
+            if (r.code == 404) return@use Fetch.Ok(null)
             if (!r.isSuccessful) return@use Fetch.Err(r.code == 429 || (r.code == 403 && r.header("x-ratelimit-remaining") == "0"))
-            val text = r.body.string()
-            val list = org.json.JSONArray(text).let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
-            // Betas and releases are two apps (different package names, one cannot update the
-            // other): each one is offered its own channel only.
-            // A pre-release that is not a version of the app (a test build's tag) is never offered.
-            Fetch.Ok(newest(list))
+            Fetch.Ok(releaseFrom(JSONObject(r.body.string())))
         }
     } catch (e: Exception) { Fetch.Err(false) }
 
     /**
-     * The newest release of this app and channel in [releases] (GitHub's list): a stable build takes
-     * releases, a beta pre-releases, and only those that carry this app's APK for this phone. The
-     * repository also holds Myspoti's releases (2.x, numbered above this app's 1.x, with Myspoti APKs
-     * this app cannot install): read as this app's, they were offered as updates opening their page.
+     * A GitHub release as this app's update offer, or null when it is not one: a draft,
+     * the other channel's (a pre-release for a stable build, a full release for a beta),
+     * a tag that is not a version of the app, or a release carrying no APK this app may
+     * take ([apkAsset]).
      */
-    internal fun newest(releases: List<JSONObject>, beta: Boolean = isBeta, abis: List<String> = deviceAbis, name: String = BuildConfig.APK_NAME): Release? =
-        releases.filter { !it.optBoolean("draft") && it.optBoolean("prerelease") == beta && isVersionTag(it.optString("tag_name")) }
-            .map { Release(it.getString("tag_name").removePrefix("v"), it.getString("html_url"), cleanNotes(it.optString("body")), apkAsset(it, beta, abis, name)) }
-            .filter { it.apkUrl.isNotEmpty() }
-            .reduceOrNull { best, next -> if (isNewer(next.version, best.version)) next else best }
+    internal fun releaseFrom(release: JSONObject, beta: Boolean = isBeta): Release? {
+        if (release.optBoolean("draft") || release.optBoolean("prerelease") != beta) return null
+        val tag = release.optString("tag_name")
+        if (!isVersionTag(tag)) return null
+        val asset = apkAsset(release) ?: return null
+        return Release(tag.removePrefix("v"), release.optString("html_url"), cleanNotes(release.optString("body")), asset.url, asset.sizeBytes)
+    }
 
     /** The newer release last seen, dismissed or not (no request): what Settings > About shows. */
     fun known(context: Context): Release? =
@@ -129,36 +136,36 @@ object UpdateChecker {
         val version = prefs.getString("version", null) ?: return null
         val url = prefs.getString("url", null) ?: return null
         if (!manual && prefs.getString("dismissed", null) == version) return null
-        return Release(version, url, prefs.getString("notes", null).orEmpty(), prefs.getString("apk", null).orEmpty()).takeIf { isNewer(version, BuildConfig.VERSION_NAME) }
+        return Release(version, url, prefs.getString("notes", null).orEmpty(), prefs.getString("apk", null).orEmpty(),
+            prefs.getLong("size", 0L)).takeIf { isNewer(version, BuildConfig.VERSION_NAME) }
     }
 
-    /** The ABIs a release carries one APK for, and their names in it (as app/build.gradle.kts `collectApks`). */
-    internal val RELEASE_ABIS = mapOf("arm64-v8a" to "ARMv8", "armeabi-v7a" to "ARMv7")
+    /** An APK of a release: where to download it and how big GitHub says it is. */
+    internal data class ApkAsset(val url: String, val sizeBytes: Long)
 
-    /** "v2.4.0", "2.5.0-beta.1": a version of the app, not some other tag ("automix2-build205"). */
-    internal fun isVersionTag(tag: String): Boolean = Regex("v?\\d+(\\.\\d+)+(-[0-9A-Za-z.]+)?").matches(tag)
+    /** "v14", "v2.4.0", "2.5.0-beta.1": a version of the app, not some other tag ("automix2-build205"). */
+    internal fun isVersionTag(tag: String): Boolean = Regex("v?\\d+(\\.\\d+)*(-[0-9A-Za-z.]+)?").matches(tag)
 
     /**
-     * The release's APK download link for this app's channel and this phone. A release carries
-     * `<name>-<version>-ARMv8.apk`, `-ARMv7.apk`, `-universal.apk` and `-TV.apk` (betas:
-     * `<name>-Beta-<version>-...`), [name] following the app id (see APK_NAME in
-     * app/build.gradle.kts), and the first of [abis] (the phone's, most preferred first) that has
-     * one wins, so a 64-bit phone that also runs armeabi-v7a takes ARMv8. Only this app's and this
-     * channel's APK: another one (the other channel, or Myspoti's own `Myspoti-...` builds) is a
-     * different package that Android cannot install over this one, so a name that matches none
-     * (or no APK for this phone's ABIs) gives no link, and the release page opens instead.
+     * The release's APK download link, Island-style: the first asset whose name ends in
+     * ".apk" and does not contain "debug", whose address [UpdateDownloadPolicy] trusts
+     * (this project's own repositories only) and whose size is within the cap. The feed
+     * is Scadify's own releases repo, so no name scheme has to be matched — the policy
+     * check on the address and [trustedUpdate] after the download are the guards. No
+     * such asset: no link, and the release page opens instead.
      */
-    internal fun apkAsset(release: JSONObject, beta: Boolean = isBeta, abis: List<String> = deviceAbis, name: String = BuildConfig.APK_NAME): String {
-        val assets = release.optJSONArray("assets") ?: return ""
-        val version = release.optString("tag_name").removePrefix("v")
-        val named = "${if (beta) "$name-Beta" else name}-$version"
-        val byName = (0 until assets.length()).map { assets.getJSONObject(it) }.associateBy { it.optString("name") }
-        return abis.filter { it in RELEASE_ABIS }.map { "$named-${RELEASE_ABIS.getValue(it)}.apk" }
-            .firstNotNullOfOrNull { byName[it] }?.optString("browser_download_url").orEmpty()
+    internal fun apkAsset(release: JSONObject): ApkAsset? {
+        val assets = release.optJSONArray("assets") ?: return null
+        for (i in 0 until assets.length()) {
+            val asset = assets.getJSONObject(i)
+            val name = asset.optString("name").lowercase()
+            val url = asset.optString("browser_download_url")
+            val size = asset.optLong("size", 0L)
+            if (name.endsWith(".apk") && "debug" !in name && size in 0..UpdateDownloadPolicy.MAX_APK_BYTES &&
+                UpdateDownloadPolicy.isReleaseAssetUrl(url)) return ApkAsset(url, size)
+        }
+        return null
     }
-
-    /** This phone's ABIs, most preferred first. */
-    private val deviceAbis: List<String> get() = android.os.Build.SUPPORTED_ABIS.toList()
 
     fun dismiss(context: Context, release: Release) {
         context.getSharedPreferences("updates", Context.MODE_PRIVATE).edit()
@@ -183,7 +190,8 @@ object UpdateChecker {
     val isBeta get() = BuildConfig.VERSION_NAME.contains("-beta")
 
     /**
-     * "1.10.0" > "1.9.2". A release is newer than its betas ("2.0.0" > "2.0.0-beta.3"), and
+     * "14" > "13", "1.10.0" > "1.9.2" (numbers, not text; non-numeric parts count as 0).
+     * A release is newer than its betas ("2.0.0" > "2.0.0-beta.3"), and
      * betas compare by number ("2.0.0-beta.2" > "2.0.0-beta.1").
      */
     fun isNewer(candidate: String, current: String): Boolean {
