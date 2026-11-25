@@ -1022,7 +1022,7 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
                         // A list downloaded as a whole stays in step with Spotify (new songs in, gone songs out).
                         val listKept = com.music.spotui.data.offline.OfflineCollections.isDownloaded(p.uri)
                         LaunchedEffect(listKept, p.complete, p.tracks.size) { if (listKept && p.complete) com.music.spotui.data.offline.OfflineCollections.sync(p) }
-                        if (onSpotify && p.type != "imported") com.music.spotui.ui.components.DownloadListButton(downloadedCount, ids.size, busy, kept = listKept, touch = com.music.spotui.ui.components.MinTouch) {
+                        if (onSpotify) com.music.spotui.ui.components.DownloadListButton(downloadedCount, ids.size, busy, kept = listKept, touch = com.music.spotui.ui.components.MinTouch) {
                             if (listKept) askRemoveDownloads = true
                             else {
                                 com.music.spotui.ui.components.DownloadAsk.start(context) { q ->

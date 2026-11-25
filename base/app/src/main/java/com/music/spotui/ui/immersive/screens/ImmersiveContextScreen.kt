@@ -905,7 +905,7 @@ private fun ContextHeader(
                 }
                 val listKept = OfflineCollections.isDownloaded(p.uri)
                 LaunchedEffect(listKept, p.complete, p.tracks.size) { if (listKept && p.complete) OfflineCollections.sync(p) }
-                if (p.type != "imported") DownloadCircle(downloadedCount, ids.size, busy, listKept) {
+                DownloadCircle(downloadedCount, ids.size, busy, listKept) {
                     if (listKept) onAskRemoveDownloads()
                     else DownloadAsk.start(context) { q ->
                         com.music.spotui.di.Haptics.confirm()
