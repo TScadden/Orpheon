@@ -895,6 +895,9 @@ private fun ContextHeader(
                 )
                 // The page's own songs, downloaded as a whole stay in step with the catalogue.
                 val ids = p.tracks.map { it.spotifyTrackId }.filter { it.isNotBlank() }.distinct()
+                // Phone files in the list have nothing to download (and must never
+                // enter the offline store): the confirmation names the split.
+                val split = com.music.spotui.data.offline.DownloadSplit.of(p.tracks.map { it.url to it.spotifyTrackId })
                 // Songs with no matching recording count as settled: the list can still be removed.
                 val downloadedCount = ids.count {
                     OfflineStore.isDownloaded(it) || OfflineStore.status[it] == OfflineStatus.Unavailable
@@ -910,7 +913,9 @@ private fun ContextHeader(
                     else DownloadAsk.start(context) { q ->
                         com.music.spotui.di.Haptics.confirm()
                         OfflineCollections.download(p, q)
-                        Toast.makeText(context, context.getString(R.string.lbl_downloading), Toast.LENGTH_SHORT).show()
+                        val note = if (split.localFiles > 0) context.getString(R.string.download_split_notice, split.downloadable, split.localFiles)
+                            else context.getString(R.string.lbl_downloading)
+                        Toast.makeText(context, note, Toast.LENGTH_SHORT).show()
                     }
                 }
                 if (SmartShuffle.canPlay(p.uri)) ImmersiveCircleButton(

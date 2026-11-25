@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -84,6 +85,11 @@ fun ImmersiveDownloadsScreen(navController: NavController) {
         val s = OfflineStore.status[it.trackId]
         s == OfflineStatus.Queued || s is OfflineStatus.Downloading
     }
+    // The phone's own files: not downloads (the offline store's remove would delete
+    // the user's music), listed apart under "On this phone". Null until read.
+    var localTracks by remember { mutableStateOf<List<com.music.spotui.data.local.LocalTrack>?>(null) }
+    LaunchedEffect(Unit) { localTracks = com.music.spotui.data.local.LocalMusic.tracks(context) }
+    val onThisPhone = stringResource(R.string.downloads_on_this_phone)
     val np by SongPlayer.nowPlaying
     val playingHere = LocalPlayer.active.value && LocalPlayer.contextName == title
     var menuSong by remember { mutableStateOf<SongsModel?>(null) }
@@ -106,7 +112,7 @@ fun ImmersiveDownloadsScreen(navController: NavController) {
 
     val listState = rememberLazyListState()
     ImmersivePageFrame {
-        if (tracks.isEmpty() && waiting.isEmpty()) {
+        if (tracks.isEmpty() && waiting.isEmpty() && localTracks?.isEmpty() == true) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
@@ -143,6 +149,11 @@ fun ImmersiveDownloadsScreen(navController: NavController) {
                     )
                     Text(
                         stringResource(R.string.downloads_source),
+                        style = Immersive.Caption,
+                        modifier = Modifier.padding(horizontal = Immersive.Gutter),
+                    )
+                    Text(
+                        stringResource(R.string.downloads_local_note),
                         style = Immersive.Caption,
                         modifier = Modifier.padding(horizontal = Immersive.Gutter).padding(bottom = 14.dp),
                     )
@@ -242,6 +253,30 @@ fun ImmersiveDownloadsScreen(navController: NavController) {
                             )
                         }
                         if (i < shown.lastIndex) ImmersiveRowDivider(ImmersiveRowDividerInset)
+                    }
+                }
+                // The phone's own files, apart from the downloads: no remove here —
+                // they are the user's files, not Scadify's copies. A tap plays.
+                val locals = localTracks.orEmpty()
+                if (locals.isNotEmpty() && find.isBlank()) {
+                    item(key = "downloads:phone_title") {
+                        Text(
+                            onThisPhone,
+                            style = Immersive.Headline,
+                            modifier = Modifier.padding(horizontal = Immersive.Gutter).padding(top = 18.dp, bottom = 6.dp),
+                        )
+                    }
+                    itemsIndexed(locals, key = { _, t -> "p:" + t.id }) { index, t ->
+                        val current = LocalPlayer.active.value && np.uri == "local:${t.id}"
+                        ImmersiveListRow(
+                            title = t.title,
+                            subtitle = t.artist.ifBlank { null },
+                            imageUrl = t.artUri.toString(),
+                            round = false,
+                            playing = current && SongPlayer.isPlaying(),
+                            onClick = { LocalPlayer.play(locals, index, context = onThisPhone) },
+                            modifier = Modifier.animateItem(),
+                        )
                     }
                 }
             }
