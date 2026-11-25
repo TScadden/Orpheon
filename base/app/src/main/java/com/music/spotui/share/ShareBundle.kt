@@ -80,7 +80,9 @@ data class ShareManifest(
             ShareManifest(
                 name = o.optString("name"), senderName = o.optString("senderName"),
                 createdAt = o.optLong("createdAt"),
-                coverEntry = o.optString("cover").takeIf { it.isNotBlank() },
+                // isNull, not optString: a JSON null reads back through optString as the
+                // word "null", which would pose as a cover entry named null.
+                coverEntry = if (o.isNull("cover")) null else o.optString("cover").takeIf { it.isNotBlank() },
                 totalBytes = o.optLong("totalBytes"), tracks = tracks,
             )
         }.getOrNull()
