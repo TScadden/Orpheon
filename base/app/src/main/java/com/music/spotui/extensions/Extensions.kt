@@ -1305,11 +1305,12 @@ object Extensions {
         return trackInfo(t.trackId, t.title, t.artist, t.album, t.durationMs, t.coverUrl)
     }
 
-    fun trackInfo(trackId: String, title: String, artist: String, album: String, durationMs: Long, cover: String?): TrackInfo {
+    fun trackInfo(trackId: String, title: String, artist: String, album: String, durationMs: Long, cover: String?, isrc: String? = null): TrackInfo {
         val artists = artist.split(", ").map { it.trim() }.filter { it.isNotEmpty() }
         return TrackInfo(
             id = trackId, uri = if (trackId.isBlank()) "" else com.music.spotui.data.catalog.CatalogRuntime.uriOfKey(trackId) ?: "spotify:track:$trackId", title = title,
             artist = artists.firstOrNull().orEmpty(), artists = artists, album = album, durationMs = durationMs,
+            isrc = isrc?.takeIf { it.isNotBlank() },
             cover = cover?.takeIf { it.startsWith("http") },
         )
     }

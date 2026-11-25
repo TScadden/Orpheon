@@ -61,19 +61,25 @@ object OfflineDownloader {
         val coverUrl: String,
         /** The quality chosen for this download ([DownloadQuality.name]); empty = the setting. */
         val quality: String = "",
+        /** The recording's ISRC, when the row it came from carried one (an imported
+         * playlist's read does): the download match turns on it, so it is used instead of
+         * a live lookup. Empty when unknown; requests saved before it was kept read as "". */
+        val isrc: String = "",
     ) {
         fun toJson(): JSONObject = JSONObject().put("id", trackId).put("title", title).put("artist", artist)
             .put("album", album).put("albumId", albumId).put("duration", durationMs).put("cover", coverUrl)
-            .put("quality", quality)
+            .put("quality", quality).put("isrc", isrc)
 
         companion object {
             fun of(s: SongsModel) = Request(
                 trackId = s.spotifyTrackId, title = s.title, artist = s.singer, album = s.album,
                 albumId = s.albumId, durationMs = s.durationMs.toLong(), coverUrl = s.coverUri,
+                isrc = s.isrc,
             )
             fun fromJson(o: JSONObject) = Request(
                 o.getString("id"), o.optString("title"), o.optString("artist"), o.optString("album"),
                 o.optString("albumId"), o.optLong("duration"), o.optString("cover"), o.optString("quality"),
+                o.optString("isrc"),
             )
         }
     }
@@ -526,7 +532,9 @@ object OfflineDownloader {
         val api = app.myspoti.host.android.MyspotiRuntime.api
         val uri = "spotify:track:${r.trackId}"
         val t = runCatching { api.catalog.track(uri) }.onFailure { Log.w(TAG, "${r.title}: Spotify track: $it") }.getOrNull()
-        val isrc = runCatching { api.catalog.isrc(uri) }.onFailure { Log.w(TAG, "${r.title}: ISRC: $it") }.getOrNull()
+        // The request's own ISRC (an imported song's, read off Spotify's own track record
+        // at import) is the recording's: no live lookup for it. Anything else looks it up.
+        val isrc = normalizeIsrc(r.isrc) ?: runCatching { api.catalog.isrc(uri) }.onFailure { Log.w(TAG, "${r.title}: ISRC: $it") }.getOrNull()?.let(::normalizeIsrc)
         val cover = r.coverUrl.ifBlank { t?.album?.images?.maxByOrNull { it.width ?: 0 }?.url.orEmpty() }
         val meta = Meta(
             title = r.title.ifBlank { t?.name.orEmpty() },
@@ -535,7 +543,7 @@ object OfflineDownloader {
             albumId = r.albumId.ifBlank { t?.album?.uri?.substringAfterLast(':').orEmpty() },
             durationMs = r.durationMs.takeIf { it > 0 } ?: t?.durationMs ?: 0L,
             coverUrl = cover,
-            isrc = isrc?.let(::normalizeIsrc),
+            isrc = isrc,
         )
         val resolved = if (t == null) catalogMeta(r, meta) else meta
         return resolved.also { if (it.title.isBlank() || it.artist.isBlank()) throw Unavailable("no track metadata") }

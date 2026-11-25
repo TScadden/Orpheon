@@ -996,6 +996,7 @@ class Api constructor(
         spotifyTrackId = s.spotifyTrackId,
         durationMs = s.durationMs.toInt(),
         rowUid = s.key,
+        isrc = s.isrc,
     )
 
     /**
