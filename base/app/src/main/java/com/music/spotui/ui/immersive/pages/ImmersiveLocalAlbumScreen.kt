@@ -58,12 +58,12 @@ fun ImmersiveLocalAlbumScreen(navController: NavController, artist: String, albu
     var editing by remember { mutableStateOf<LocalItem?>(null) }
     var coverTick by remember { mutableStateOf(0) }
     LaunchedEffect(artist, album) {
-        tracks = LocalAlbums.tracksFor(LocalMusic.tracks(context), artist, album)
+        tracks = LocalAlbums.tracksFor(LocalMusic.tracks(context), album)
     }
-    val albumCover = remember(coverTick, artist, album) { LocalCovers.albumCover(artist, album) }
+    val albumCover = remember(coverTick, album) { LocalCovers.albumCover(album) }
     val pickCover = com.music.spotui.ui.components.rememberPlaylistCoverPicker { uri ->
         scope.launch {
-            val path = withContext(Dispatchers.IO) { LocalCovers.setAlbumCover(context, artist, album, uri) }
+            val path = withContext(Dispatchers.IO) { LocalCovers.setAlbumCover(context, album, uri) }
             if (path != null) coverTick++
             else Toast.makeText(context, context.getString(R.string.local_cover_failed), Toast.LENGTH_SHORT).show()
         }
@@ -72,21 +72,30 @@ fun ImmersiveLocalAlbumScreen(navController: NavController, artist: String, albu
         ImmersiveSheetRow(Icons.Rounded.Image, stringResource(R.string.local_change_cover), onClick = { menu = false; pickCover() })
         if (albumCover != null) ImmersiveSheetRow(Icons.Rounded.HideImage, stringResource(R.string.local_remove_cover), onClick = {
             menu = false
-            LocalCovers.clearAlbumCover(artist, album)
+            LocalCovers.clearAlbumCover(album)
             coverTick++
         })
     }
     editing?.let { item ->
         com.music.spotui.ui.screens.EditLocalItemDialog(item) {
             editing = null
-            scope.launch { tracks = LocalAlbums.tracksFor(LocalMusic.tracks(context, refresh = true), artist, album) }
+            scope.launch { tracks = LocalAlbums.tracksFor(LocalMusic.tracks(context, refresh = true), album) }
         }
     }
     val list = tracks.orEmpty()
     val np by SongPlayer.nowPlaying
+    // Same header rule as the Classic page: an artist is named only when every
+    // file shares that one artist string; mixed credits read Various artists.
+    val sharedArtist = if (tracks != null) LocalAlbums.sharedArtist(list) else null
+    val artistPart = when {
+        tracks == null || list.isEmpty() -> null
+        sharedArtist == null -> stringResource(R.string.local_various_artists)
+        sharedArtist.isBlank() -> null
+        else -> sharedArtist
+    }
     ImmersivePage(
         title = album,
-        subtitle = listOfNotNull(artist.takeIf { it.isNotBlank() },
+        subtitle = listOfNotNull(artistPart,
             pluralStringResource(R.plurals.lbl_n_songs_s, list.size, list.size.toString()).takeIf { tracks != null })
             .joinToString(" • ").takeIf { it.isNotBlank() },
         onBack = { navController.navigateUp() },

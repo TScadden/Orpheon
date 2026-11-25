@@ -74,9 +74,10 @@ import kotlinx.coroutines.withContext
 
 /**
  * One album of the phone's own files: the files sharing the opened track's
- * effective album name. Reached from "Show album" on a local file — a local
+ * effective album name — the name alone groups them, whatever artist strings
+ * the files carry. Reached from "Show album" on a local file — a local
  * file's album is this set, never the catalog album of the same name. The
- * album's cover is set here (LocalCovers, keyed by artist + album); the rows
+ * album's cover is set here (LocalCovers, keyed by album name); the rows
  * are Local Files rows: tap plays, heart likes, + adds to a playlist, ⋮ edits.
  */
 @OptIn(ExperimentalGlideComposeApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -90,12 +91,12 @@ fun LocalAlbumScreen(navController: NavController, artist: String, album: String
     var adding by remember { mutableStateOf<LocalTrack?>(null) }
     var coverTick by remember { mutableStateOf(0) }
     LaunchedEffect(artist, album) {
-        tracks = LocalAlbums.tracksFor(LocalMusic.tracks(context), artist, album)
+        tracks = LocalAlbums.tracksFor(LocalMusic.tracks(context), album)
     }
-    val albumCover = remember(coverTick, artist, album) { LocalCovers.albumCover(artist, album) }
+    val albumCover = remember(coverTick, album) { LocalCovers.albumCover(album) }
     val pickCover = com.music.spotui.ui.components.rememberPlaylistCoverPicker { uri ->
         scope.launch {
-            val path = withContext(Dispatchers.IO) { LocalCovers.setAlbumCover(context, artist, album, uri) }
+            val path = withContext(Dispatchers.IO) { LocalCovers.setAlbumCover(context, album, uri) }
             if (path != null) coverTick++
             else Toast.makeText(context, context.getString(R.string.local_cover_failed), Toast.LENGTH_SHORT).show()
         }
@@ -105,7 +106,7 @@ fun LocalAlbumScreen(navController: NavController, artist: String, album: String
             uri = t.uri.toString(), artUri = t.artUri.toString()) { title, artist2, album2 ->
             com.music.spotui.data.local.LocalMetadata.edit(t.uri.toString(), title, artist2, album2)
             editing = null
-            scope.launch { tracks = LocalAlbums.tracksFor(LocalMusic.tracks(context, refresh = true), artist, album) }
+            scope.launch { tracks = LocalAlbums.tracksFor(LocalMusic.tracks(context, refresh = true), album) }
         }
     }
     adding?.let { t -> AddLocalToPlaylistSheet(t, onDismiss = { adding = null }) }
@@ -114,12 +115,21 @@ fun LocalAlbumScreen(navController: NavController, artist: String, album: String
             LocalAlbumSheetRow(Icons.Outlined.Image, stringResource(R.string.local_change_cover)) { menu = false; pickCover() }
             if (albumCover != null) LocalAlbumSheetRow(Icons.Outlined.HideImage, stringResource(R.string.local_remove_cover)) {
                 menu = false
-                LocalCovers.clearAlbumCover(artist, album)
+                LocalCovers.clearAlbumCover(album)
                 coverTick++
             }
         }
     }
     val list = tracks.orEmpty()
+    // The header names an artist only when every file on the page shares that
+    // one artist string; a name-grouped album of mixed credits reads Various.
+    val sharedArtist = if (tracks != null) LocalAlbums.sharedArtist(list) else null
+    val artistPart = when {
+        tracks == null || list.isEmpty() -> null
+        sharedArtist == null -> stringResource(R.string.local_various_artists)
+        sharedArtist.isBlank() -> null
+        else -> sharedArtist
+    }
     Box(Modifier.fillMaxSize().background(AppBackground)) {
         Column(Modifier.fillMaxSize()) {
             Row(
@@ -133,7 +143,7 @@ fun LocalAlbumScreen(navController: NavController, artist: String, album: String
                 Column(Modifier.weight(1f).padding(start = 4.dp)) {
                     Text(album, color = AppText, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
-                        listOfNotNull(artist.takeIf { it.isNotBlank() },
+                        listOfNotNull(artistPart,
                             pluralStringResource(R.plurals.lbl_n_songs_s, list.size, list.size.toString()).takeIf { tracks != null })
                             .joinToString(" • "),
                         color = AppMuted, fontSize = 13.sp,

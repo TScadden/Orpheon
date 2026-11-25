@@ -133,6 +133,7 @@
     <string name="local_added_count_skipped">Added %1$d to %2$s · %3$d already there</string>
     <string name="local_playlist_empty">Add songs from Local Files with their + button.</string>
     <string name="local_album_empty">No files of this album are on this phone.</string>
+    <string name="local_various_artists">Various artists</string>
     <string name="local_no_album">No album is set for this file. Edit the song to add one.</string>
     <string name="downloads_local_note">Files already on this phone are not downloads. They are listed under On this phone, below.</string>
     <string name="downloads_on_this_phone">On this phone</string>
