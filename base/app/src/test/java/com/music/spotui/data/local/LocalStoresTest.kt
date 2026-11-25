@@ -58,6 +58,37 @@ class LocalStoresTest {
         assertTrue(ImportedPlaylists.list().isEmpty())
     }
 
+    @Test fun anImportedSongsIsrcSurvivesARestartAsText() {
+        val p = ImportedPlaylists.create("With Isrc", "https://open.spotify.com/playlist/isrc", listOf(
+            ImportedSong("", "AAA", "One", "Artist A", "Alb", 201_000L, "", "USS1Z2500001"),
+            ImportedSong("", "BBB", "Two", "Artist B", "Other", 182_000L, ""),
+        ))
+        val text = ImportedPlaylists.write()
+        ImportedPlaylists.playlists.clear()
+        ImportedPlaylists.read(text)
+        val again = ImportedPlaylists.playlists.getValue(p.id)
+        assertEquals("USS1Z2500001", again.items[0].isrc)
+        assertEquals("", again.items[1].isrc)
+        ImportedPlaylists.delete(p.id)
+    }
+
+    @Test fun anImportedPlaylistFileWrittenBeforeIsrcStillLoads() {
+        // A v10 file: no "isrc" key anywhere. The songs load with "" and lose nothing else.
+        ImportedPlaylists.read(
+            """{"version":1,"playlists":[
+                {"id":"old1","name":"Old Mix","source":"https://open.spotify.com/playlist/old","created":5,"cover":"",
+                 "items":[{"key":"k1","track":"AAA","title":"One","artist":"Artist A","album":"Alb","duration":201000,"cover":"https://img/1"}]}
+            ]}""",
+        )
+        val old = ImportedPlaylists.playlists.getValue("old1")
+        assertEquals("Old Mix", old.name)
+        assertEquals(1, old.items.size)
+        assertEquals("AAA", old.items[0].spotifyTrackId)
+        assertEquals("Alb", old.items[0].album)
+        assertEquals("", old.items[0].isrc)
+        ImportedPlaylists.delete("old1")
+    }
+
     @Test fun anImportedSongIsImportedOncePerTrackId() {
         // The store's no-duplicates rule, at import: a source list naming the same track
         // twice imports it once (first listing first); a song with no track id cannot be

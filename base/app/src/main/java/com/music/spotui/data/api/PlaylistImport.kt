@@ -1,6 +1,7 @@
 package com.music.spotui.data.api
 
 import com.music.spotui.data.local.ImportedSong
+import com.music.spotui.data.offline.OfflineDownloader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -116,10 +117,65 @@ object SpotifyEmbed {
                     artist = t.optJSONArray("artists")?.let { a -> (0 until a.length()).joinToString(", ") { a.getJSONObject(it).optString("name") } }.orEmpty(),
                     album = album?.optString("name").orEmpty(),
                     durationMs = t.optLong("duration_ms"), coverUrl = cover,
+                    // The API's track object carries the recording's ISRC (the embed page
+                    // never does): kept normalized, as every other ISRC in the app is.
+                    isrc = t.optJSONObject("external_ids")?.optString("isrc")?.let(OfflineDownloader::normalizeIsrc).orEmpty(),
                 )
             }.getOrNull()
         }
         return SpotifyApiPage(tracks, o.optInt("total", tracks.size), o.optString("next").isNotBlank())
+    }
+
+    /** How a song is matched across the two readings: its Spotify id, or — when either
+     * reading lacks one — its normalized title and artist. */
+    private fun nameKey(s: ImportedSong): String =
+        s.title.trim().lowercase().replace(Regex("\\s+"), " ") + "|" +
+            s.artist.trim().lowercase().replace(Regex("\\s+"), " ")
+
+    /** [base] (an embed row) completed by [rich] (the API's row of the same song): every
+     * field the API's reading carries wins, the embed's stands where the API has none. */
+    private fun overlay(base: ImportedSong, rich: ImportedSong) = ImportedSong(
+        key = base.key,
+        spotifyTrackId = rich.spotifyTrackId.ifBlank { base.spotifyTrackId },
+        title = rich.title.ifBlank { base.title },
+        artist = rich.artist.ifBlank { base.artist },
+        album = rich.album.ifBlank { base.album },
+        durationMs = rich.durationMs.takeIf { it > 0 } ?: base.durationMs,
+        coverUrl = rich.coverUrl.ifBlank { base.coverUrl },
+        isrc = rich.isrc.ifBlank { base.isrc },
+    )
+
+    /**
+     * The two readings of one playlist, merged song by song: the embed's order stands
+     * (it is the playlist's order), each embed row is completed by the API's row of the
+     * same song, and songs only the API reached are appended in API order. A partial or
+     * failed API read therefore completes the songs it did return instead of the fuller
+     * reading winning wholesale — the old either/or lost every cover and album name
+     * whenever the API's list came back shorter than the embed's.
+     */
+    fun mergeReads(embed: List<ImportedSong>, api: List<ImportedSong>): List<ImportedSong> {
+        if (api.isEmpty()) return embed
+        if (embed.isEmpty()) return api
+        val byId = HashMap<String, Int>()
+        val byName = HashMap<String, Int>()
+        api.forEachIndexed { i, s ->
+            if (s.spotifyTrackId.isNotBlank()) byId.putIfAbsent(s.spotifyTrackId, i)
+            byName.putIfAbsent(nameKey(s), i)
+        }
+        val used = HashSet<Int>()
+        val matchedIds = HashSet<String>()
+        val merged = embed.map { e ->
+            val at = if (e.spotifyTrackId.isNotBlank()) byId[e.spotifyTrackId] else byName[nameKey(e)]
+            if (at == null) e else {
+                used += at
+                api[at].spotifyTrackId.takeIf { it.isNotBlank() }?.let { matchedIds += it }
+                overlay(e, api[at])
+            }
+        }
+        // An API row is appended only when no embed row took it — a song the API lists
+        // twice completes the embed's row once and is not appended as a second copy
+        // (the store keeps a song at most once per playlist anyway).
+        return merged + api.filterIndexed { i, s -> i !in used && (s.spotifyTrackId.isBlank() || s.spotifyTrackId !in matchedIds) }
     }
 }
 
@@ -141,7 +197,9 @@ object PlaylistImport {
 
     /**
      * The playlist [id]'s songs: the embed page first; when its anonymous token is there, the
-     * API's pages too (the embed caps its own list), and the fuller of the two readings wins.
+     * API's pages too (the embed caps its own list), and the two readings are merged song by
+     * song ([SpotifyEmbed.mergeReads]) — the embed's rows carry no album, cover or ISRC, the
+     * API's carry all three, and neither reading is guaranteed complete.
      */
     suspend fun fetchSpotify(id: String): Imported = withContext(Dispatchers.IO) {
         val embed = SpotifyEmbed.parse(get("https://open.spotify.com/embed/playlist/$id"))
@@ -160,7 +218,8 @@ object PlaylistImport {
                 if (!page.hasNext || all.size >= apiTotal || offset > 10_000) break
                 offset += 100
             }
-            if (all.size >= songs.size) { songs = all; total = apiTotal }
+            songs = SpotifyEmbed.mergeReads(embed.tracks, all)
+            total = maxOf(total, apiTotal)
         }
         Imported(embed.name, songs, maxOf(total, songs.size))
     }

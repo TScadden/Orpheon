@@ -26,6 +26,10 @@ data class ImportedSong(
     val album: String,
     val durationMs: Long,
     val coverUrl: String,
+    /** The recording's ISRC, when the source's read carried it (the Spotify API does, the
+     * embed page does not): playback and downloads match sources by it, no lookup needed.
+     * "" when unknown — playlists stored before it was kept read as "". */
+    val isrc: String = "",
 )
 
 /** A playlist brought in from a public link (see PlaylistImport), kept on this phone only. */
@@ -137,9 +141,10 @@ object ImportedPlaylists {
 
     private fun songJson(s: ImportedSong) = JSONObject().put("key", s.key).put("track", s.spotifyTrackId)
         .put("title", s.title).put("artist", s.artist).put("album", s.album).put("duration", s.durationMs).put("cover", s.coverUrl)
+        .put("isrc", s.isrc)
 
     private fun songOf(o: JSONObject) = ImportedSong(o.getString("key"), o.getString("track"), o.optString("title"),
-        o.optString("artist"), o.optString("album"), o.optLong("duration"), o.optString("cover"))
+        o.optString("artist"), o.optString("album"), o.optLong("duration"), o.optString("cover"), o.optString("isrc"))
 
     internal fun write(): String {
         val lists = JSONArray()
