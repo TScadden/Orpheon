@@ -107,7 +107,8 @@ fun LocalFilesScreen(navController: NavController) {
     )
     var editing by remember { mutableStateOf<LocalTrack?>(null) }
     editing?.let { t ->
-        EditLocalTrackDialog(t.title, t.artist, t.album, onDismiss = { editing = null }) { title, artist, album ->
+        EditLocalTrackDialog(t.title, t.artist, t.album, onDismiss = { editing = null },
+            uri = t.uri.toString(), artUri = t.artUri.toString()) { title, artist, album ->
             com.music.spotui.data.local.LocalMetadata.edit(t.uri.toString(), title, artist, album)
             editing = null
             scope.launch { tracks = LocalMusic.tracks(context, refresh = true) }

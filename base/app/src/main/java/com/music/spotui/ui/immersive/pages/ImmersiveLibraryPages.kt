@@ -299,7 +299,7 @@ fun ImmersiveLocalPlaylistScreen(navController: NavController, id: String) {
                     ImmersiveListRow(
                         title = item.title,
                         subtitle = item.artist.ifBlank { null },
-                        imageUrl = item.artUri,
+                        imageUrl = com.music.spotui.data.local.LocalCovers.effectiveArt(item),
                         round = false,
                         playing = current && SongPlayer.isPlaying(),
                         onClick = {

@@ -26,7 +26,7 @@ data class LocalItem(
     fun toTrack() = LocalTrack(
         id = key.hashCode().toLong() and 0x7fffffffL,
         uri = Uri.parse(uri), title = title, artist = artist, album = album,
-        durationMs = durationMs, artUri = Uri.parse(artUri),
+        durationMs = durationMs, artUri = Uri.parse(LocalCovers.effectiveArt(this)),
     )
 
     companion object {

@@ -876,7 +876,7 @@ class Api constructor(
             SongsModel(
                 id = stableId("localfile:" + item.uri),
                 title = item.title, album = item.album, singer = item.artist,
-                coverUri = item.artUri, url = "local:" + item.uri,
+                coverUri = com.music.spotui.data.local.LocalCovers.effectiveArt(item), url = "local:" + item.uri,
                 durationMs = item.durationMs.toInt(),
             )
         }

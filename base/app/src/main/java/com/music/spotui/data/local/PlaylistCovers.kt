@@ -17,8 +17,11 @@ import kotlin.math.min
 object PlaylistCovers {
     private const val SIZE = 512
 
-    /** Copies the image at [uri] into the covers folder; its path, or null when it cannot be read. */
-    fun save(context: Context, uri: Uri): String? = runCatching {
+    /** Copies the image at [uri] into the playlist covers folder; its path, or null when it cannot be read. */
+    fun save(context: Context, uri: Uri): String? = saveTo(context, uri, "playlist_covers")
+
+    /** Copies the image at [uri] into the [folder] covers folder under the app's files. */
+    fun saveTo(context: Context, uri: Uri, folder: String): String? = runCatching {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
@@ -29,7 +32,7 @@ object PlaylistCovers {
         val side = min(src.width, src.height)
         val square = Bitmap.createBitmap(src, (src.width - side) / 2, (src.height - side) / 2, side, side)
         val sized = if (side > SIZE) Bitmap.createScaledBitmap(square, SIZE, SIZE, true) else square
-        val dir = File(context.filesDir, "playlist_covers").apply { mkdirs() }
+        val dir = File(context.filesDir, folder).apply { mkdirs() }
         val out = File(dir, UUID.randomUUID().toString() + ".jpg")
         FileOutputStream(out).use { dest -> check(sized.compress(Bitmap.CompressFormat.JPEG, 88, dest)) }
         out.absolutePath

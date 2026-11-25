@@ -457,9 +457,14 @@ fun FolderScreen(navController: NavController, uri: String, initialName: String)
  * [onSave]. The file itself is never changed — the app keeps the names (LocalMetadata)
  * and shows them for the file everywhere. The album starts from the file's effective
  * album; emptying it leaves the file's own album in place (no album override).
+ *
+ * With [uri] (the file's own address) the dialog also carries the file's cover: a
+ * picked picture is copied in at once (LocalCovers), not on Save — a cover is a
+ * picture, not a name, and the preview should show it the moment it is chosen.
+ * [artUri] is the art the file shows now, for that preview.
  */
 @Composable
-fun EditLocalTrackDialog(title: String, artist: String, album: String, onDismiss: () -> Unit, onSave: (String, String, String) -> Unit) {
+fun EditLocalTrackDialog(title: String, artist: String, album: String, onDismiss: () -> Unit, uri: String? = null, artUri: String? = null, onSave: (String, String, String) -> Unit) {
     var newTitle by remember { mutableStateOf(title) }
     var newArtist by remember { mutableStateOf(artist) }
     var newAlbum by remember { mutableStateOf(album) }
@@ -474,6 +479,7 @@ fun EditLocalTrackDialog(title: String, artist: String, album: String, onDismiss
         title = { Text(stringResource(R.string.local_edit_title_artist), color = AppText) },
         text = {
             Column {
+                if (uri != null) LocalCoverEditor(uri, artUri)
                 TextField(value = newTitle, onValueChange = { newTitle = it }, singleLine = true,
                     label = { Text(stringResource(R.string.local_edit_song_title), color = AppMuted) },
                     colors = fieldColors, modifier = Modifier.fillMaxWidth())
@@ -500,10 +506,47 @@ fun EditLocalTrackDialog(title: String, artist: String, album: String, onDismiss
     )
 }
 
+/**
+ * The cover half of the local edit dialog: the art the file shows now, a Change cover
+ * (the system photo picker; the picture is copied into the app's files at once) and,
+ * while the file has a cover of its own, a Remove cover. Shared by the Local Files
+ * edit and the stored-row edit — both are the same file underneath.
+ */
+@OptIn(ExperimentalGlideComposeApi::class)
+@Composable
+private fun LocalCoverEditor(uri: String, artUri: String?) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var tick by remember { mutableStateOf(0) }
+    val own = remember(tick, uri) { com.music.spotui.data.local.LocalCovers.songCover(uri) }
+    val pickCover = com.music.spotui.ui.components.rememberPlaylistCoverPicker { picked ->
+        scope.launch {
+            val saved = withContext(Dispatchers.IO) { com.music.spotui.data.local.LocalCovers.setSongCover(context, uri, picked) }
+            if (saved == null) Toast.makeText(context, context.getString(R.string.local_cover_failed), Toast.LENGTH_SHORT).show()
+            else tick++
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
+        GlideImage(
+            model = own?.let { java.io.File(it) } ?: artUri.orEmpty(), contentDescription = null, contentScale = ContentScale.Crop,
+            loading = placeholder(R.drawable.placeholder), failure = placeholder(R.drawable.local_files_cover),
+            modifier = Modifier.size(52.dp).clip(RoundedCornerShape(4.dp)),
+        )
+        Column(Modifier.padding(start = 8.dp)) {
+            TextButton(onClick = pickCover) { Text(stringResource(R.string.local_change_cover), color = Green) }
+            if (own != null) TextButton(onClick = {
+                com.music.spotui.data.local.LocalCovers.clearSongCover(uri)
+                tick++
+            }) { Text(stringResource(R.string.local_remove_cover), color = AppText) }
+        }
+    }
+}
+
 /** [EditLocalTrackDialog] for a stored local row: the edit lands through LocalMetadata. */
 @Composable
 fun EditLocalItemDialog(item: LocalItem, onDismiss: () -> Unit) {
-    EditLocalTrackDialog(item.title, item.artist, item.album, onDismiss) { title, artist, album ->
+    EditLocalTrackDialog(item.title, item.artist, item.album, onDismiss,
+        uri = item.uri, artUri = com.music.spotui.data.local.LocalCovers.effectiveArt(item)) { title, artist, album ->
         com.music.spotui.data.local.LocalMetadata.edit(item.uri, title, artist, album)
         com.music.spotui.data.local.LocalMusic.invalidate()
         onDismiss()
@@ -536,7 +579,7 @@ private fun LocalItemRow(
     ) {
         Box(Modifier.size(48.dp)) {
             GlideImage(
-                model = item.artUri, contentDescription = null, contentScale = ContentScale.Crop,
+                model = com.music.spotui.data.local.LocalCovers.effectiveArt(item), contentDescription = null, contentScale = ContentScale.Crop,
                 loading = placeholder(R.drawable.placeholder), failure = placeholder(R.drawable.local_files_cover),
                 modifier = Modifier.matchParentSize().clip(RoundedCornerShape(4.dp)),
             )
