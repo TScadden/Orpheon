@@ -14,6 +14,7 @@ package com.music.spotui.ui.immersive.lyrics
 
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.rounded.Abc
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Translate
 import com.music.spotui.ui.components.secondaryClick
 import android.os.Build
@@ -103,6 +104,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import app.myspoti.engine.R
 import com.music.spotui.data.entity.LyricLine
 import com.music.spotui.data.entity.Lyrics
+import com.music.spotui.data.preferences.LyricGlowPref
 import com.music.spotui.data.preferences.LyricsRomanizationPref
 import com.music.spotui.di.Graph
 import com.music.spotui.di.SongPlayer
@@ -207,29 +209,45 @@ fun ImmersiveLyricsPanel(modifier: Modifier = Modifier, contentPadding: PaddingV
             // the lines they were made for.
             key(trackKey) {
                 Box(modifier) {
-                    // Other lyrics for the same song (the line-timed ones shown first, then the
-                    // word-timed ones): each has its own list, opened on the line being sung, and the
-                    // new one fades in over the old. Reported: the lines jumped when the words came,
-                    // the new list starting at its top for a frame before it found its line.
-                    androidx.compose.animation.Crossfade(
-                        targetState = current.lyrics, animationSpec = tween(LYRICS_SWAP_MS), label = "lyricsSwap",
-                        modifier = Modifier.fillMaxSize(),
-                    ) { shown ->
-                        val live = shown === current.lyrics
-                        // The translation the song options sheet turned on, line for line with the source's.
-                        LyricsList(
-                            shown, trackKey, Modifier.fillMaxSize(), contentPadding, vm,
-                            translations = current.translations.takeIf { live && current.showTranslation },
-                            romanizing = LyricsRomanizationPref.on && shown.hasRomanization,
+                    // LyricGlow takes the panel over while it is on — synced words only: with no
+                    // timings there is nothing for the sweep to follow, and the list stays.
+                    val glowOn = LyricGlowPref.immersive && current.lyrics.synced && !selecting
+                    if (glowOn) {
+                        LyricGlowView(
+                            lyrics = current.lyrics,
+                            trackKey = trackKey,
+                            title = title,
+                            artist = artist,
+                            fallbackAccent = Immersive.Accent,
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = contentPadding,
                         )
+                    } else {
+                        // Other lyrics for the same song (the line-timed ones shown first, then the
+                        // word-timed ones): each has its own list, opened on the line being sung, and the
+                        // new one fades in over the old. Reported: the lines jumped when the words came,
+                        // the new list starting at its top for a frame before it found its line.
+                        androidx.compose.animation.Crossfade(
+                            targetState = current.lyrics, animationSpec = tween(LYRICS_SWAP_MS), label = "lyricsSwap",
+                            modifier = Modifier.fillMaxSize(),
+                        ) { shown ->
+                            val live = shown === current.lyrics
+                            // The translation the song options sheet turned on, line for line with the source's.
+                            LyricsList(
+                                shown, trackKey, Modifier.fillMaxSize(), contentPadding, vm,
+                                translations = current.translations.takeIf { live && current.showTranslation },
+                                romanizing = LyricsRomanizationPref.on && shown.hasRomanization,
+                            )
+                        }
                     }
-                    // The romanization, when the lyrics have one, then the Classic screen's translation,
-                    // with its language setting and its service: the lyrics are only sent when it is
-                    // tapped. Not offered for a song already in that language.
+                    // LyricGlow's toggle first (for a synced song), then the romanization, when the
+                    // lyrics have one, then the Classic screen's translation, with its language
+                    // setting and its service: the lyrics are only sent when it is tapped. Not
+                    // offered for a song already in that language.
                     val target = com.music.spotui.ui.components.readerLanguage()
                     val canRomanize = current.lyrics.hasRomanization
                     val canTranslate = !LyricsViewModel.sameLanguage(current.sourceLanguage, target)
-                    if (!selecting && (canRomanize || canTranslate)) {
+                    if (!selecting && (canRomanize || canTranslate || current.lyrics.synced)) {
                         val layoutDirection = LocalLayoutDirection.current
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -240,6 +258,12 @@ fun ImmersiveLyricsPanel(modifier: Modifier = Modifier, contentPadding: PaddingV
                                     end = Immersive.Gutter + contentPadding.calculateEndPadding(layoutDirection),
                                 ),
                         ) {
+                            if (current.lyrics.synced) LyricsToggle(
+                                icon = Icons.Rounded.AutoAwesome,
+                                description = stringResource(R.string.lyric_glow),
+                                on = LyricGlowPref.immersive,
+                                onClick = { LyricGlowPref.setImmersive(context, !LyricGlowPref.immersive) },
+                            )
                             if (canRomanize) LyricsToggle(
                                 icon = Icons.Rounded.Abc,
                                 description = stringResource(R.string.lyrics_romanize),
