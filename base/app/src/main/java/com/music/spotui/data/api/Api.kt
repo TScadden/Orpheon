@@ -881,12 +881,37 @@ class Api constructor(
             )
         }
 
-    /** [tracks] (the account's liked songs) with this phone's liked files on top. */
+    /**
+     * The catalog songs liked on this phone (CatalogLikes), as Liked Songs rows. The
+     * platform's library keeps nothing, so the account's list can never carry them; the
+     * rows are added to the page here instead. Their play key is the song's own url (a
+     * catalog play address, or a Spotify play query rebuilt from the snapshot), so the
+     * page plays them through the normal catalog pipeline, as anywhere else.
+     */
+    private fun catalogLikedSongs(): List<SongsModel> =
+        com.music.spotui.data.local.CatalogLikes.items.map { like ->
+            SongsModel(
+                id = stableId("track:" + like.trackId),
+                title = like.title, album = like.album, singer = like.artist,
+                coverUri = like.coverUri,
+                url = like.url.ifBlank { SongPlayer.buildSpotifyPlayQuery(like.trackId, like.title, like.artist) },
+                spotifyTrackId = like.trackId,
+                durationMs = like.durationMs.toInt(),
+            )
+        }
+
+    /** [tracks] (the account's liked songs) with this phone's likes on top: catalog songs first, then files. */
     private fun withLocalLiked(tracks: List<SongsModel>): List<SongsModel> {
+        val catalog = catalogLikedSongs()
         val locals = localLikedSongs()
-        if (locals.isEmpty()) return tracks
+        if (catalog.isEmpty() && locals.isEmpty()) return tracks
+        val ids = tracks.mapTo(HashSet()) { it.spotifyTrackId }
         val urls = tracks.mapTo(HashSet()) { it.url }
-        return locals.filter { it.url !in urls } + tracks
+        // A song the account list already carries is not listed twice (by its track id,
+        // or by the address that plays it).
+        val extra = catalog.filter { it.spotifyTrackId !in ids && it.url !in urls } +
+            locals.filter { it.url !in urls }
+        return extra + tracks
     }
 
     /**
@@ -910,9 +935,9 @@ class Api constructor(
         if (LikedCache.tracks == null) LikedCache.tracks = withContext(Dispatchers.IO) { ScreenCache.liked.read() }
         LikedCache.tracks?.let { emit(Response.Success(page(it, true))) } ?: emit(Response.Loading())
         if (!ready()) {
-            // No account answer: this phone's liked files are still a Liked Songs page.
+            // No account answer: this phone's likes are still a Liked Songs page.
             if (LikedCache.tracks == null) {
-                if (localLikedSongs().isNotEmpty()) emit(Response.Success(page(emptyList(), true)))
+                if (localLikedSongs().isNotEmpty() || catalogLikedSongs().isNotEmpty()) emit(Response.Success(page(emptyList(), true)))
                 else emit(Response.Error(notSignedIn()))
             }
             return@flow
@@ -977,7 +1002,8 @@ class Api constructor(
             uri = "scadify:imported:$id",
             type = "imported",
             name = p.name,
-            coverUri = p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl.orEmpty(),
+            coverUri = if (p.cover.isNotBlank()) java.io.File(p.cover).toURI().toString()
+                else p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl.orEmpty(),
             ownerName = context.getString(R.string.imported_playlist_subtitle),
             metaLine = context.resources.getQuantityString(R.plurals.lbl_n_songs, p.items.size, p.items.size),
             tracks = p.items.map(::importedSongOf),

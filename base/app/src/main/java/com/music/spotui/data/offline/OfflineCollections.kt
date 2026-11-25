@@ -221,6 +221,8 @@ object OfflineCollections {
         val flow = when (c.type) {
             "album" -> api.getAlbumPage(id, stored = false)
             "liked" -> api.getLikedPage()
+            // An imported list lives on this phone alone: its page is read from its store.
+            "imported" -> api.getImportedPlaylistPage(id)
             else -> api.getPlaylistPage(id)
         }
         // A flow that ends without a complete page (the player never ready) is no page, not an error.

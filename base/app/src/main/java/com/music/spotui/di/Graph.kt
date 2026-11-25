@@ -33,6 +33,7 @@ object Graph {
         com.music.spotui.data.local.LocalPlaylists.init(application)
         com.music.spotui.data.local.ImportedPlaylists.init(application)
         com.music.spotui.data.local.LocalLikes.init(application)
+        com.music.spotui.data.local.CatalogLikes.init(application)
         com.music.spotui.data.local.LocalMetadata.init(application)
         com.music.spotui.data.local.LibraryOrder.init(application)
         runCatching { com.music.spotui.data.DataSaverGlide.install(application) }

@@ -57,4 +57,17 @@ object DefaultExtensions {
             else -> State.Unavailable
         }
     }
+
+    /**
+     * An entry's state once its install offer has been made. A catalogue can advertise a
+     * version its author's own download does not carry (Fresh Home's listing reads 1.1.0
+     * from the repository's manifest; the package it serves is 1.0.0): the step then offers
+     * an [State.Update], the install plan for the downloaded package reports it is not
+     * newer than what is installed, and the update can never complete. Such an entry
+     * settles to [State.Installed] — the step stops promising an update that does not
+     * exist. Every other state, and an update whose package really is newer, passes
+     * through unchanged; the Extensions store outside this step is untouched.
+     */
+    fun settled(state: State, planNotNewer: Boolean): State =
+        if (planNotNewer && state is State.Update) State.Installed else state
 }

@@ -1,16 +1,23 @@
 package com.music.spotui.ui.immersive.pages
 
 import com.music.spotui.ui.immersive.sheets.ImmersiveAlertDialog
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.HideImage
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -21,7 +28,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
@@ -40,6 +49,7 @@ import com.music.spotui.di.Graph
 import com.music.spotui.di.LocalPlayer
 import com.music.spotui.di.SongPlayer
 import com.music.spotui.ui.immersive.Immersive
+import com.music.spotui.ui.immersive.components.ImmersiveCover
 import com.music.spotui.ui.immersive.components.ImmersiveListRow
 import com.music.spotui.ui.immersive.components.ImmersiveMessageState
 import com.music.spotui.ui.immersive.components.ImmersivePlayShuffleButtons
@@ -50,6 +60,7 @@ import com.music.spotui.ui.immersive.shell.ImmersiveTopBar
 import com.music.spotui.ui.immersive.shell.rememberTopBarCollapse
 import com.music.spotui.ui.screens.LibraryItemSheet
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -170,15 +181,33 @@ fun ImmersiveFolderScreen(navController: NavController, uri: String, initialName
 @Composable
 fun ImmersiveLocalPlaylistScreen(navController: NavController, id: String) {
     val playlist = LocalPlaylists.playlists[id]
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
-    // A row's own menu (long press or ⋯ on the row): edit its title / artist, or take it out.
+    // A row's own menu (⋯ on the row): edit its title / artist, or take it out. A long press
+    // no longer opens it — it starts a multi-select instead (below); the ⋯ stays.
     var rowMenu by remember { mutableStateOf<com.music.spotui.data.local.LocalItem?>(null) }
     var rowEditing by remember { mutableStateOf<com.music.spotui.data.local.LocalItem?>(null) }
+    var selection by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var addingSelected by remember { mutableStateOf(false) }
+    val selecting = selection.isNotEmpty()
+    val pickCover = com.music.spotui.ui.components.rememberPlaylistCoverPicker { uri ->
+        scope.launch {
+            val path = withContext(Dispatchers.IO) { com.music.spotui.data.local.PlaylistCovers.save(context, uri) }
+            if (path != null) LocalPlaylists.setCover(id, path)
+            else android.widget.Toast.makeText(context, context.getString(R.string.local_cover_failed), android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
     if (playlist == null) {
         LaunchedEffect(Unit) { navController.navigateUp() }
         return
     }
+    androidx.activity.compose.BackHandler(enabled = selecting) { selection = emptySet() }
+    if (addingSelected) com.music.spotui.ui.screens.AddLocalTracksToPlaylistSheet(
+        tracks = playlist.items.filter { it.key in selection }.map { it.toTrack() },
+        onDismiss = { addingSelected = false; selection = emptySet() },
+    )
     rowMenu?.let { item ->
         ImmersiveSheet(onDismiss = { rowMenu = null }) {
             ImmersiveSheetRow(Icons.Rounded.Edit, stringResource(R.string.local_edit_title_artist), onClick = { rowMenu = null; rowEditing = item })
@@ -193,6 +222,11 @@ fun ImmersiveLocalPlaylistScreen(navController: NavController, id: String) {
     }
     if (menu) ImmersiveSheet(onDismiss = { menu = false }) {
         ImmersiveSheetRow(Icons.Rounded.Edit, stringResource(R.string.local_rename), onClick = { menu = false; renaming = true })
+        ImmersiveSheetRow(Icons.Rounded.Image, stringResource(R.string.local_change_cover), onClick = { menu = false; pickCover() })
+        if (playlist.cover.isNotBlank()) ImmersiveSheetRow(Icons.Rounded.HideImage, stringResource(R.string.local_remove_cover), onClick = {
+            menu = false
+            LocalPlaylists.clearCover(id)
+        })
         ImmersiveSheetRow(Icons.Rounded.DeleteOutline, stringResource(R.string.local_delete_playlist), destructive = true, onClick = {
             menu = false
             navController.navigateUp()
@@ -208,17 +242,38 @@ fun ImmersiveLocalPlaylistScreen(navController: NavController, id: String) {
     val playingHere = LocalPlayer.active.value && LocalPlayer.contextName == playlist.name
     val tracks = playlist.items.map { it.toTrack() }
     ImmersivePage(
-        title = playlist.name,
-        subtitle = stringResource(R.string.local_playlist_subtitle) + " • " +
+        title = if (selecting) stringResource(R.string.select_selected_count, selection.size) else playlist.name,
+        subtitle = if (selecting) null else stringResource(R.string.local_playlist_subtitle) + " • " +
             pluralStringResource(R.plurals.lbl_n_songs_s, playlist.items.size, playlist.items.size.toString()),
-        onBack = { navController.navigateUp() },
+        onBack = { if (selecting) selection = emptySet() else navController.navigateUp() },
         actions = {
-            ImmersiveBarAction(Icons.Rounded.MoreHoriz, stringResource(R.string.lbl_more), onClick = { menu = true })
+            if (selecting) {
+                ImmersiveBarAction(Icons.Rounded.SelectAll, stringResource(R.string.select_all), onClick = {
+                    selection = com.music.spotui.ui.components.MultiSelect.selectAll(selection, playlist.items.map { it.key })
+                })
+                ImmersiveBarAction(Icons.AutoMirrored.Rounded.PlaylistAdd, stringResource(R.string.lbl_add_to_playlist), onClick = { addingSelected = true })
+                ImmersiveBarAction(Icons.Rounded.DeleteOutline, stringResource(R.string.local_remove_selected), onClick = {
+                    LocalPlaylists.removeAll(id, selection)
+                    selection = emptySet()
+                })
+                ImmersiveBarAction(Icons.Rounded.Close, stringResource(R.string.select_cancel), onClick = { selection = emptySet() })
+            } else {
+                ImmersiveBarAction(Icons.Rounded.MoreHoriz, stringResource(R.string.lbl_more), onClick = { menu = true })
+            }
         },
     ) {
         if (playlist.items.isEmpty()) {
             item(key = "empty") { ImmersiveMessageState(stringResource(R.string.local_playlist_empty)) }
             return@ImmersivePage
+        }
+        if (playlist.cover.isNotBlank()) item(key = "cover") {
+            Box(Modifier.fillMaxWidth().padding(horizontal = Immersive.Gutter, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                ImmersiveCover(
+                    java.io.File(playlist.cover).toURI().toString(),
+                    Modifier.fillMaxWidth(0.62f).aspectRatio(1f),
+                    Immersive.CoverLarge,
+                )
+            }
         }
         item(key = "buttons") {
             ImmersivePlayShuffleButtons(
@@ -236,17 +291,26 @@ fun ImmersiveLocalPlaylistScreen(navController: NavController, id: String) {
         itemsIndexed(playlist.items, key = { _, item -> item.key }) { index, item ->
             val current = LocalPlayer.active.value && np.uri == "local:${tracks[index].id}"
             Column(Modifier.animateItem()) {
-                ImmersiveSwipeToRemove(item.key, onRemove = { LocalPlaylists.remove(id, item.key) }) {
+                val row = @Composable {
                     ImmersiveListRow(
                         title = item.title,
                         subtitle = item.artist.ifBlank { null },
                         imageUrl = item.artUri,
                         round = false,
                         playing = current && SongPlayer.isPlaying(),
-                        onClick = { LocalPlayer.play(tracks, index, context = playlist.name) },
-                        onMore = { rowMenu = item },
+                        onClick = {
+                            if (selecting) selection = com.music.spotui.ui.components.MultiSelect.toggle(selection, item.key)
+                            else LocalPlayer.play(tracks, index, context = playlist.name)
+                        },
+                        onMore = if (selecting) null else ({ rowMenu = item }),
+                        onLongClick = {
+                            selection = if (selecting) com.music.spotui.ui.components.MultiSelect.toggle(selection, item.key) else setOf(item.key)
+                        },
+                        selected = if (selecting) item.key in selection else null,
                     )
                 }
+                // The swipe and a selection would fight: while selecting, rows only tap.
+                if (selecting) row() else ImmersiveSwipeToRemove(item.key, onRemove = { LocalPlaylists.remove(id, item.key) }) { row() }
             }
         }
     }

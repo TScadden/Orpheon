@@ -329,15 +329,19 @@ fun LibraryScreen(navController: NavController) {
                     val localLists = com.music.spotui.data.local.LocalPlaylists.list().map { p ->
                         com.music.spotui.data.entity.LibraryEntry(
                             spotifyId = LOCAL_PLAYLIST_PREFIX + p.id, name = p.name,
-                            subtitle = localSubtitle, coverUri = "", isPlaylist = true,
+                            subtitle = localSubtitle,
+                            coverUri = if (p.cover.isNotBlank()) java.io.File(p.cover).toURI().toString() else "",
+                            isPlaylist = true,
                         )
                     }
-                    // And the playlists imported from a public link, with their first song's cover.
+                    // And the playlists imported from a public link: their own cover when one
+                    // was picked, else their first song's cover.
                     val importedLists = com.music.spotui.data.local.ImportedPlaylists.list().map { p ->
                         com.music.spotui.data.entity.LibraryEntry(
                             spotifyId = IMPORTED_PLAYLIST_PREFIX + p.id, name = p.name,
                             subtitle = stringResource(R.string.lbl_playlist) + " • " + stringResource(R.string.imported_playlist_subtitle),
-                            coverUri = p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl.orEmpty(), isPlaylist = true,
+                            coverUri = if (p.cover.isNotBlank()) java.io.File(p.cover).toURI().toString()
+                                else p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl.orEmpty(), isPlaylist = true,
                         )
                     }
                     list.take(at) + (if (com.music.spotui.data.preferences.LocalFilesPref.shown) listOf(local) else emptyList()) + (if (radioOn) listOf(radio) else emptyList()) +
@@ -640,7 +644,8 @@ fun SumUpLibraryScreen(
 fun LibraryEntryCover(entry: LibraryEntry, modifier: Modifier) {
     val drawn = when {
         entry.spotifyId == Api.HomeCache.DOWNLOADS_ID -> R.drawable.downloads_cover
-        entry.spotifyId == Api.HomeCache.LOCAL_FILES_ID || entry.spotifyId.startsWith(LOCAL_PLAYLIST_PREFIX) ||
+        entry.spotifyId == Api.HomeCache.LOCAL_FILES_ID ||
+            (entry.spotifyId.startsWith(LOCAL_PLAYLIST_PREFIX) && entry.coverUri.isBlank()) ||
             (entry.spotifyId.startsWith(IMPORTED_PLAYLIST_PREFIX) && entry.coverUri.isBlank()) -> R.drawable.local_files_cover
         entry.spotifyId == com.music.spotui.radio.RadioFeaturePref.LIBRARY_ENTRY_ID -> R.drawable.live_radio_cover
         entry.isFolder -> R.drawable.folder_cover

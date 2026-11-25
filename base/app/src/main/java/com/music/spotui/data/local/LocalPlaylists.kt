@@ -13,7 +13,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
 
-/** One occurrence of a phone file in a list (its own [key]: the same file can be there twice). */
+/** One occurrence of a phone file in a list, with its own [key] (rows are taken out by key). */
 data class LocalItem(
     val key: String,
     val uri: String,
@@ -38,7 +38,17 @@ data class LocalItem(
 }
 
 /** A playlist kept on this phone only (Spotify cannot hold phone files). */
-data class LocalPlaylist(val id: String, val name: String, val items: List<LocalItem>, val createdAt: Long)
+data class LocalPlaylist(
+    val id: String,
+    val name: String,
+    val items: List<LocalItem>,
+    val createdAt: Long,
+    /** The user's own cover picture: a file in the app's covers folder, "" for the default tile. */
+    val cover: String = "",
+)
+
+/** How a bulk add went: how many songs went in, and how many were already there. */
+data class AddResult(val added: Int, val skipped: Int)
 
 /**
  * Playlists of phone files, and phone files added to Spotify playlists ("Added on this
@@ -83,29 +93,122 @@ object LocalPlaylists {
     }
 
     fun rename(id: String, name: String) = update { playlists[id]?.let { playlists[id] = it.copy(name = name.trim()) } }
-    fun delete(id: String) = update { playlists.remove(id) }
 
-    fun add(id: String, track: LocalTrack) =
-        update { playlists[id]?.let { playlists[id] = it.copy(items = it.items + LocalItem.of(track)) } }
+    fun delete(id: String) = update {
+        playlists.remove(id)?.let { PlaylistCovers.delete(it.cover) }
+    }
+
+    /** Points the playlist at its own cover picture (a file in the covers folder). */
+    fun setCover(id: String, path: String) = update {
+        playlists[id]?.let { p ->
+            if (p.cover != path) PlaylistCovers.delete(p.cover)
+            playlists[id] = p.copy(cover = path)
+        }
+    }
+
+    /** Back to the default tile: the cover file goes with the field. */
+    fun clearCover(id: String) = update {
+        playlists[id]?.let { p ->
+            PlaylistCovers.delete(p.cover)
+            playlists[id] = p.copy(cover = "")
+        }
+    }
+
+    /**
+     * Adds [track] to the playlist. A file is in a playlist at most once — the rule is the
+     * store's, so every screen obeys it: false when the file is already there (the caller
+     * says so), true when it went in.
+     */
+    fun add(id: String, track: LocalTrack): Boolean {
+        var added = false
+        update {
+            playlists[id]?.let { p ->
+                if (p.items.none { it.uri == track.uri.toString() }) {
+                    playlists[id] = p.copy(items = p.items + LocalItem.of(track))
+                    added = true
+                }
+            }
+        }
+        return added
+    }
+
+    /** Adds every track of [tracks] the playlist does not hold yet (see [add]). */
+    fun addAll(id: String, tracks: List<LocalTrack>): AddResult {
+        var result = AddResult(0, 0)
+        update {
+            playlists[id]?.let { p ->
+                val have = p.items.mapTo(HashSet()) { it.uri }
+                val fresh = ArrayList<LocalItem>()
+                var skipped = 0
+                for (t in tracks) {
+                    if (!have.add(t.uri.toString())) skipped++ else fresh += LocalItem.of(t)
+                }
+                if (fresh.isNotEmpty()) playlists[id] = p.copy(items = p.items + fresh)
+                result = AddResult(fresh.size, skipped)
+            }
+        }
+        return result
+    }
 
     fun remove(id: String, key: String) =
         update { playlists[id]?.let { playlists[id] = it.copy(items = it.items.filterNot { i -> i.key == key }) } }
 
-    fun addToSpotify(playlistId: String, track: LocalTrack) =
-        update { additions[playlistId] = additions[playlistId].orEmpty() + LocalItem.of(track) }
+    /** Takes several rows out at once (their own keys, from a multi-select). */
+    fun removeAll(id: String, keys: Set<String>) =
+        update { playlists[id]?.let { playlists[id] = it.copy(items = it.items.filterNot { i -> i.key in keys }) } }
+
+    /** [add] for a Spotify playlist's on-this-device rows: false when the file is already there. */
+    fun addToSpotify(playlistId: String, track: LocalTrack): Boolean {
+        var added = false
+        update {
+            val rows = additions[playlistId].orEmpty()
+            if (rows.none { it.uri == track.uri.toString() }) {
+                additions[playlistId] = rows + LocalItem.of(track)
+                added = true
+            }
+        }
+        return added
+    }
+
+    /** [addAll] for a Spotify playlist's on-this-device rows. */
+    fun addAllToSpotify(playlistId: String, tracks: List<LocalTrack>): AddResult {
+        var result = AddResult(0, 0)
+        update {
+            val rows = additions[playlistId].orEmpty()
+            val have = rows.mapTo(HashSet()) { it.uri }
+            val fresh = ArrayList<LocalItem>()
+            var skipped = 0
+            for (t in tracks) {
+                if (!have.add(t.uri.toString())) skipped++ else fresh += LocalItem.of(t)
+            }
+            if (fresh.isNotEmpty()) additions[playlistId] = rows + fresh
+            result = AddResult(fresh.size, skipped)
+        }
+        return result
+    }
 
     fun removeFromSpotify(playlistId: String, key: String) = update {
         val left = additions[playlistId].orEmpty().filterNot { it.key == key }
         if (left.isEmpty()) additions.remove(playlistId) else additions[playlistId] = left
     }
 
-    /** A title / artist edit (see [LocalMetadata]) reaches every stored row of that file. */
-    fun applyMetadata(uri: String, title: String, artist: String) = update {
+    /** Several on-this-device rows of a Spotify playlist out at once (their own keys). */
+    fun removeAllFromSpotify(playlistId: String, keys: Set<String>) = update {
+        val left = additions[playlistId].orEmpty().filterNot { it.key in keys }
+        if (left.isEmpty()) additions.remove(playlistId) else additions[playlistId] = left
+    }
+
+    /** A title / artist / album edit (see [LocalMetadata]) reaches every stored row of that file. */
+    fun applyMetadata(uri: String, title: String, artist: String, album: String = "") = update {
+        fun LocalItem.named() = copy(
+            title = title, artist = artist,
+            album = if (album.isNotBlank()) album else this.album,
+        )
         playlists.forEach { (id, p) ->
-            if (p.items.any { it.uri == uri }) playlists[id] = p.copy(items = p.items.map { if (it.uri == uri) it.copy(title = title, artist = artist) else it })
+            if (p.items.any { it.uri == uri }) playlists[id] = p.copy(items = p.items.map { if (it.uri == uri) it.named() else it })
         }
         additions.forEach { (id, list) ->
-            if (list.any { it.uri == uri }) additions[id] = list.map { if (it.uri == uri) it.copy(title = title, artist = artist) else it }
+            if (list.any { it.uri == uri }) additions[id] = list.map { if (it.uri == uri) it.named() else it }
         }
     }
 
@@ -134,6 +237,7 @@ object LocalPlaylists {
         val lists = JSONArray()
         playlists.values.forEach { p ->
             lists.put(JSONObject().put("id", p.id).put("name", p.name).put("created", p.createdAt)
+                .put("cover", p.cover)
                 .put("items", JSONArray().apply { p.items.forEach { put(itemJson(it)) } }))
         }
         val adds = JSONObject()
@@ -147,7 +251,7 @@ object LocalPlaylists {
         val lists = o.optJSONArray("playlists") ?: JSONArray()
         for (i in 0 until lists.length()) {
             val p = lists.getJSONObject(i)
-            playlists[p.getString("id")] = LocalPlaylist(p.getString("id"), p.optString("name"), items(p.optJSONArray("items")), p.optLong("created"))
+            playlists[p.getString("id")] = LocalPlaylist(p.getString("id"), p.optString("name"), items(p.optJSONArray("items")), p.optLong("created"), p.optString("cover"))
         }
         val adds = o.optJSONObject("additions") ?: JSONObject()
         adds.keys().forEach { id -> items(adds.optJSONArray(id)).takeIf { it.isNotEmpty() }?.let { additions[id] = it } }

@@ -14,6 +14,7 @@ import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -38,7 +39,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.outlined.PlaylistPlay
 import androidx.compose.material.icons.automirrored.outlined.QueueMusic
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.HideImage
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
@@ -427,14 +433,16 @@ fun FolderScreen(navController: NavController, uri: String, initialName: String)
 }
 
 /**
- * "Edit title / artist" for a phone file: two fields, saved with [onSave]. The file
- * itself is never changed — the app keeps the names (LocalMetadata) and shows them
- * for the file everywhere.
+ * "Edit title / artist" for a phone file: three fields (the album too), saved with
+ * [onSave]. The file itself is never changed — the app keeps the names (LocalMetadata)
+ * and shows them for the file everywhere. The album starts from the file's effective
+ * album; emptying it leaves the file's own album in place (no album override).
  */
 @Composable
-fun EditLocalTrackDialog(title: String, artist: String, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+fun EditLocalTrackDialog(title: String, artist: String, album: String, onDismiss: () -> Unit, onSave: (String, String, String) -> Unit) {
     var newTitle by remember { mutableStateOf(title) }
     var newArtist by remember { mutableStateOf(artist) }
+    var newAlbum by remember { mutableStateOf(album) }
     val fieldColors = TextFieldDefaults.colors(
         focusedContainerColor = tone(0xFF3A3A3A), unfocusedContainerColor = tone(0xFF3A3A3A),
         focusedTextColor = AppText, unfocusedTextColor = AppText, cursorColor = Green,
@@ -453,12 +461,16 @@ fun EditLocalTrackDialog(title: String, artist: String, onDismiss: () -> Unit, o
                 TextField(value = newArtist, onValueChange = { newArtist = it }, singleLine = true,
                     label = { Text(stringResource(R.string.local_edit_song_artist), color = AppMuted) },
                     colors = fieldColors, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+                TextField(value = newAlbum, onValueChange = { newAlbum = it }, singleLine = true,
+                    label = { Text(stringResource(R.string.local_edit_song_album), color = AppMuted) },
+                    colors = fieldColors, modifier = Modifier.fillMaxWidth())
                 Text(stringResource(R.string.local_edit_song_note), color = AppMuted, fontSize = 12.sp,
                     modifier = Modifier.padding(top = 10.dp))
             }
         },
         confirmButton = {
-            TextButton(enabled = newTitle.isNotBlank(), onClick = { onSave(newTitle, newArtist) }) {
+            TextButton(enabled = newTitle.isNotBlank(), onClick = { onSave(newTitle, newArtist, newAlbum) }) {
                 Text(stringResource(R.string.playlist_save), color = Green)
             }
         },
@@ -471,25 +483,50 @@ fun EditLocalTrackDialog(title: String, artist: String, onDismiss: () -> Unit, o
 /** [EditLocalTrackDialog] for a stored local row: the edit lands through LocalMetadata. */
 @Composable
 fun EditLocalItemDialog(item: LocalItem, onDismiss: () -> Unit) {
-    EditLocalTrackDialog(item.title, item.artist, onDismiss) { title, artist ->
-        com.music.spotui.data.local.LocalMetadata.edit(item.uri, title, artist)
+    EditLocalTrackDialog(item.title, item.artist, item.album, onDismiss) { title, artist, album ->
+        com.music.spotui.data.local.LocalMetadata.edit(item.uri, title, artist, album)
         com.music.spotui.data.local.LocalMusic.invalidate()
         onDismiss()
     }
 }
 
-@OptIn(ExperimentalGlideComposeApi::class)
+@OptIn(ExperimentalGlideComposeApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun LocalItemRow(item: LocalItem, current: Boolean, onClick: () -> Unit, onMenu: (() -> Unit)? = null) {
+private fun LocalItemRow(
+    item: LocalItem,
+    current: Boolean,
+    onClick: () -> Unit,
+    onMenu: (() -> Unit)? = null,
+    /** A long press of its own (multi-select); without one the row only clicks. */
+    onLongClick: (() -> Unit)? = null,
+    /** Non-null while the list is selecting: whether this row is chosen. */
+    selected: Boolean? = null,
+) {
+    val gestures = if (onLongClick != null) {
+        Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+    } else {
+        Modifier.pressable(0.97f, onClick = onClick)
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().pressable(0.97f, onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth()
+            .then(if (selected == true) Modifier.background(Green.copy(alpha = 0.14f)) else Modifier)
+            .then(gestures)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        GlideImage(
-            model = item.artUri, contentDescription = null, contentScale = ContentScale.Crop,
-            loading = placeholder(R.drawable.placeholder), failure = placeholder(R.drawable.local_files_cover),
-            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
-        )
+        Box(Modifier.size(48.dp)) {
+            GlideImage(
+                model = item.artUri, contentDescription = null, contentScale = ContentScale.Crop,
+                loading = placeholder(R.drawable.placeholder), failure = placeholder(R.drawable.local_files_cover),
+                modifier = Modifier.matchParentSize().clip(RoundedCornerShape(4.dp)),
+            )
+            if (selected != null) Icon(
+                if (selected) Icons.Filled.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                contentDescription = null,
+                tint = if (selected) Green else AppText.copy(alpha = 0.55f),
+                modifier = Modifier.align(Alignment.BottomEnd).size(20.dp).background(AppBackground, CircleShape),
+            )
+        }
         Column(Modifier.padding(start = 12.dp).weight(1f)) {
             Text(item.title, color = if (current) Green else AppText, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (item.artist.isNotBlank()) Text(item.artist, color = AppMuted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -504,19 +541,37 @@ private fun LocalItemRow(item: LocalItem, current: Boolean, onClick: () -> Unit,
 /**
  * Phone files in a list ([items]), played by the local player. A row leaves the list by
  * swiping it away or from its ⋯ menu, which also edits the file's title / artist.
+ *
+ * With [selection] non-null the list is in (or can enter) multi-select: a long press
+ * calls [onEnterSelection], a tap calls [onToggle] instead of playing, the swipe is off
+ * (a swipe and a selection would fight), and the ⋯ menu stays for the single-row actions.
  */
 @OptIn(ExperimentalMaterial3Api::class)
-fun androidx.compose.foundation.lazy.LazyListScope.localItems(items: List<LocalItem>, context: String, onRemove: (LocalItem) -> Unit) {
+fun androidx.compose.foundation.lazy.LazyListScope.localItems(
+    items: List<LocalItem>,
+    context: String,
+    onRemove: (LocalItem) -> Unit,
+    selection: Set<String>? = null,
+    onToggle: (LocalItem) -> Unit = {},
+    onEnterSelection: (LocalItem) -> Unit = {},
+) {
     itemsIndexed(items, key = { _, i -> i.key }) { index, item ->
         val np = SongPlayer.nowPlaying.value
         val track = item.toTrack()
         var menu by remember { mutableStateOf(false) }
         var editing by remember { mutableStateOf(false) }
-        SwipeToRemove(item.key, onRemove = { onRemove(item) }) {
+        val selecting = selection != null
+        val row = @Composable {
             LocalItemRow(item, LocalPlayer.active.value && np.uri == "local:${track.id}",
-                onClick = { LocalPlayer.play(items.map { it.toTrack() }, index, context = context) },
-                onMenu = { menu = true })
+                onClick = {
+                    if (selecting) onToggle(item)
+                    else LocalPlayer.play(items.map { it.toTrack() }, index, context = context)
+                },
+                onMenu = { menu = true },
+                onLongClick = if (selecting) ({ if (selection.isEmpty()) onEnterSelection(item) else onToggle(item) }) else null,
+                selected = selection?.let { item.key in it })
         }
+        if (selecting) row() else SwipeToRemove(item.key, onRemove = { onRemove(item) }) { row() }
         if (menu) com.music.spotui.ui.components.LookSheet(onDismissRequest = { menu = false }, containerColor = SheetColor) {
             Column(Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
                 SheetRow(Icons.Outlined.Edit, stringResource(R.string.local_edit_title_artist)) { menu = false; editing = true }
@@ -527,20 +582,80 @@ fun androidx.compose.foundation.lazy.LazyListScope.localItems(items: List<LocalI
     }
 }
 
+/**
+ * The bar a Classic multi-select carries: how many are chosen, Select all, the actions
+ * (add to a playlist, and where it applies take the chosen out), and the way out.
+ */
+@Composable
+internal fun ClassicSelectionBar(
+    count: Int,
+    onSelectAll: () -> Unit,
+    onAdd: (() -> Unit)?,
+    onRemove: (() -> Unit)?,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(28.dp)).background(tone(0xFF282828))
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.size(40.dp).clip(CircleShape).pressable(0.92f, onClick = onCancel),
+        ) { Icon(Icons.Default.Close, stringResource(R.string.select_cancel), tint = AppText, modifier = Modifier.size(22.dp)) }
+        Text(stringResource(R.string.select_selected_count, count), color = AppText, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 4.dp))
+        TextButton(onClick = onSelectAll) { Text(stringResource(R.string.select_all), color = Green, fontSize = 14.sp) }
+        Spacer(Modifier.weight(1f))
+        if (onRemove != null) TextButton(onClick = onRemove) {
+            Text(stringResource(R.string.local_remove_selected), color = AppText, fontSize = 14.sp)
+        }
+        if (onAdd != null) Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.height(40.dp).pressable(0.96f, onClick = onAdd)
+                .clip(RoundedCornerShape(50)).background(Green).padding(horizontal = 16.dp),
+        ) { Text(stringResource(R.string.lbl_add_to_playlist), color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+    }
+}
+
 /** A playlist kept on this phone. */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalGlideComposeApi::class)
 @Composable
 fun LocalPlaylistScreen(navController: NavController, id: String) {
     val playlist = LocalPlaylists.playlists[id]
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
+    var selection by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var addingSelected by remember { mutableStateOf(false) }
+    val pickCover = com.music.spotui.ui.components.rememberPlaylistCoverPicker { uri ->
+        scope.launch {
+            val path = withContext(Dispatchers.IO) { com.music.spotui.data.local.PlaylistCovers.save(context, uri) }
+            if (path != null) LocalPlaylists.setCover(id, path)
+            else Toast.makeText(context, context.getString(R.string.local_cover_failed), Toast.LENGTH_SHORT).show()
+        }
+    }
     if (playlist == null) {
         LaunchedEffect(Unit) { navController.navigateUp() }
         return
     }
+    val selecting = selection.isNotEmpty()
+    androidx.activity.compose.BackHandler(enabled = selecting) { selection = emptySet() }
+    if (addingSelected) AddLocalTracksToPlaylistSheet(
+        tracks = playlist.items.filter { it.key in selection }.map { it.toTrack() },
+        onDismiss = { addingSelected = false; selection = emptySet() },
+    )
     if (menu) com.music.spotui.ui.components.LookSheet(onDismissRequest = { menu = false }, containerColor = SheetColor) {
         Column(Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
             SheetRow(Icons.Outlined.Edit, stringResource(R.string.local_rename)) { menu = false; renaming = true }
+            SheetRow(Icons.Outlined.Image, stringResource(R.string.local_change_cover)) { menu = false; pickCover() }
+            if (playlist.cover.isNotBlank()) SheetRow(Icons.Outlined.HideImage, stringResource(R.string.local_remove_cover)) {
+                menu = false
+                LocalPlaylists.clearCover(id)
+            }
             SheetRow(Icons.Outlined.Delete, stringResource(R.string.local_delete_playlist)) {
                 menu = false
                 navController.navigateUp()
@@ -550,28 +665,56 @@ fun LocalPlaylistScreen(navController: NavController, id: String) {
     }
     if (renaming) NameDialog(stringResource(R.string.local_rename), playlist.name, stringResource(R.string.local_rename),
         onDismiss = { renaming = false }) { renaming = false; LocalPlaylists.rename(id, it) }
-    Column(Modifier.fillMaxSize().background(AppBackground)) {
-        PageHeader(playlist.name, stringResource(R.string.local_playlist_subtitle) + " • " +
-            pluralStringResource(R.plurals.lbl_n_songs_s, playlist.items.size, playlist.items.size.toString()),
-            navController) { menu = true }
-        if (playlist.items.isEmpty()) Text(stringResource(R.string.local_playlist_empty), color = AppMuted, fontSize = 14.sp,
-            modifier = Modifier.padding(20.dp))
-        else LazyColumn(contentPadding = PaddingValues(bottom = com.music.spotui.ui.components.bottomBarsSpace()), modifier = Modifier.fillMaxSize()) {
-            item {
-                Row(Modifier.fillMaxWidth().padding(16.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Spacer(Modifier.weight(1f))
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.size(52.dp).pressable(0.92f) {
-                            LocalPlayer.play(playlist.items.map { it.toTrack() }, 0, context = playlist.name)
-                        }.clip(CircleShape).background(Green),
-                    ) {
-                        Icon(painterResource(R.drawable.play_svgrepo_com), stringResource(R.string.lbl_play), tint = Color.Black, modifier = Modifier.size(24.dp))
+    Box(Modifier.fillMaxSize().background(AppBackground)) {
+        Column(Modifier.fillMaxSize()) {
+            PageHeader(playlist.name, stringResource(R.string.local_playlist_subtitle) + " • " +
+                pluralStringResource(R.plurals.lbl_n_songs_s, playlist.items.size, playlist.items.size.toString()),
+                navController) { menu = true }
+            if (playlist.items.isEmpty()) Text(stringResource(R.string.local_playlist_empty), color = AppMuted, fontSize = 14.sp,
+                modifier = Modifier.padding(20.dp))
+            else LazyColumn(contentPadding = PaddingValues(bottom = com.music.spotui.ui.components.bottomBarsSpace()), modifier = Modifier.fillMaxSize()) {
+                if (playlist.cover.isNotBlank()) item(key = "cover") {
+                    GlideImage(
+                        model = java.io.File(playlist.cover), contentDescription = null, contentScale = ContentScale.Crop,
+                        loading = placeholder(R.drawable.local_files_cover), failure = placeholder(R.drawable.local_files_cover),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                            .height(180.dp).clip(RoundedCornerShape(8.dp)),
+                    )
+                }
+                item {
+                    Row(Modifier.fillMaxWidth().padding(16.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Spacer(Modifier.weight(1f))
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.size(52.dp).pressable(0.92f) {
+                                LocalPlayer.play(playlist.items.map { it.toTrack() }, 0, context = playlist.name)
+                            }.clip(CircleShape).background(Green),
+                        ) {
+                            Icon(painterResource(R.drawable.play_svgrepo_com), stringResource(R.string.lbl_play), tint = Color.Black, modifier = Modifier.size(24.dp))
+                        }
                     }
                 }
+                localItems(
+                    playlist.items, playlist.name,
+                    onRemove = { LocalPlaylists.remove(id, it.key) },
+                    selection = selection,
+                    onToggle = { selection = com.music.spotui.ui.components.MultiSelect.toggle(selection, it.key) },
+                    onEnterSelection = { selection = setOf(it.key) },
+                )
             }
-            localItems(playlist.items, playlist.name) { LocalPlaylists.remove(id, it.key) }
         }
+        if (selecting) ClassicSelectionBar(
+            count = selection.size,
+            onSelectAll = { selection = com.music.spotui.ui.components.MultiSelect.selectAll(selection, playlist.items.map { it.key }) },
+            onAdd = { addingSelected = true },
+            onRemove = {
+                LocalPlaylists.removeAll(id, selection)
+                selection = emptySet()
+            },
+            onCancel = { selection = emptySet() },
+            modifier = Modifier.align(Alignment.BottomCenter)
+                .padding(bottom = com.music.spotui.ui.components.bottomBarsSpace()),
+        )
     }
 }
 
@@ -580,25 +723,41 @@ fun LocalPlaylistScreen(navController: NavController, id: String) {
  * the user's Spotify playlists, where it is shown under "Added on this device" (Spotify
  * cannot hold phone files, so it stays on this phone).
  */
+@Composable
+fun AddLocalToPlaylistSheet(track: LocalTrack, onDismiss: () -> Unit) =
+    AddLocalToPlaylistSheet(listOf(track), single = true, onDismiss = onDismiss)
+
+/** [AddLocalToPlaylistSheet] for a multi-select's songs at once. */
+@Composable
+fun AddLocalTracksToPlaylistSheet(tracks: List<LocalTrack>, onDismiss: () -> Unit) =
+    AddLocalToPlaylistSheet(tracks, single = false, onDismiss = onDismiss)
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalGlideComposeApi::class)
 @Composable
-fun AddLocalToPlaylistSheet(track: LocalTrack, onDismiss: () -> Unit) {
+private fun AddLocalToPlaylistSheet(tracks: List<LocalTrack>, single: Boolean, onDismiss: () -> Unit) {
     val context = LocalContext.current
     var spotifyLists by remember { mutableStateOf(com.music.spotui.data.api.EditablePlaylists.cachedWithCovers()) }
     var creating by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         spotifyLists = com.music.spotui.data.api.EditablePlaylists.loadWithCovers()
     }
-    fun added(name: String) {
-        Toast.makeText(context, context.getString(R.string.local_added_to, name), Toast.LENGTH_SHORT).show()
+    // What the add did is always said: in, already there (the store refuses a song twice),
+    // or a mix of the two for a bulk add.
+    fun added(name: String, result: com.music.spotui.data.local.AddResult) {
+        val message = when {
+            result.added == 0 -> context.getString(R.string.local_already_in_playlist)
+            result.skipped == 0 && single -> context.getString(R.string.local_added_to, name)
+            result.skipped == 0 -> context.getString(R.string.local_added_count_to, result.added, name)
+            else -> context.getString(R.string.local_added_count_skipped, result.added, name, result.skipped)
+        }
+        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
         onDismiss()
     }
     if (creating) {
         NameDialog(stringResource(R.string.local_playlist_new), context.getString(R.string.my_playlist),
             stringResource(R.string.lbl_create), onDismiss = { creating = false }) { name ->
             val p = LocalPlaylists.create(name)
-            LocalPlaylists.add(p.id, track)
-            added(p.name)
+            added(p.name, LocalPlaylists.addAll(p.id, tracks))
         }
         return
     }
@@ -613,15 +772,18 @@ fun AddLocalToPlaylistSheet(track: LocalTrack, onDismiss: () -> Unit) {
                     stringResource(R.string.local_playlist_subtitle)) { creating = true }
             }
             items(LocalPlaylists.list(), key = { "l:" + it.id }) { p ->
-                PickRow(name = p.name, detail = stringResource(R.string.local_playlist_subtitle), cover = null) {
-                    LocalPlaylists.add(p.id, track); added(p.name)
+                PickRow(
+                    name = p.name, detail = stringResource(R.string.local_playlist_subtitle),
+                    cover = p.cover.takeIf { it.isNotBlank() }?.let { java.io.File(it) },
+                ) {
+                    added(p.name, LocalPlaylists.addAll(p.id, tracks))
                 }
             }
             when (val lists = spotifyLists) {
                 null -> item { Text(stringResource(R.string.loading_playlists), color = Color.Gray, fontSize = 14.sp, modifier = Modifier.padding(20.dp, 12.dp)) }
                 else -> items(lists, key = { "s:" + it.id }) { p ->
                     PickRow(name = p.name, detail = stringResource(R.string.local_added_section), cover = p.imageUrl) {
-                        LocalPlaylists.addToSpotify(p.id, track); added(p.name)
+                        added(p.name, LocalPlaylists.addAllToSpotify(p.id, tracks))
                     }
                 }
             }
@@ -632,7 +794,7 @@ fun AddLocalToPlaylistSheet(track: LocalTrack, onDismiss: () -> Unit) {
 
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
-private fun PickRow(name: String, detail: String, cover: String?, onClick: () -> Unit) {
+private fun PickRow(name: String, detail: String, cover: Any?, onClick: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 8.dp),
