@@ -384,14 +384,19 @@ private fun libraryEntries(entries: Response<List<LibraryEntry>>): Pair<List<Lib
         val localLists = com.music.spotui.data.local.LocalPlaylists.list().map { p ->
             LibraryEntry(
                 spotifyId = LOCAL_PLAYLIST_PREFIX + p.id, name = p.name,
-                subtitle = localSubtitle, coverUri = "", isPlaylist = true,
+                subtitle = localSubtitle,
+                coverUri = if (p.cover.isNotBlank()) java.io.File(p.cover).toURI().toString() else "",
+                isPlaylist = true,
             )
         }
-        // The playlists imported from a public link, with their first song's cover.
+        // The playlists imported from a public link: their own cover when one was picked,
+        // else their first song's cover.
         val importedLists = com.music.spotui.data.local.ImportedPlaylists.list().map { p ->
             LibraryEntry(
                 spotifyId = IMPORTED_PLAYLIST_PREFIX + p.id, name = p.name,
-                subtitle = importedSubtitle, coverUri = p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl.orEmpty(), isPlaylist = true,
+                subtitle = importedSubtitle,
+                coverUri = if (p.cover.isNotBlank()) java.io.File(p.cover).toURI().toString()
+                    else p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl.orEmpty(), isPlaylist = true,
             )
         }
         list.take(at) + (if (localShown) listOf(local) else emptyList()) + (if (radioOn) listOf(radio) else emptyList()) +

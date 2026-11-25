@@ -977,7 +977,8 @@ class Api constructor(
             uri = "scadify:imported:$id",
             type = "imported",
             name = p.name,
-            coverUri = p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl.orEmpty(),
+            coverUri = if (p.cover.isNotBlank()) java.io.File(p.cover).toURI().toString()
+                else p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl.orEmpty(),
             ownerName = context.getString(R.string.imported_playlist_subtitle),
             metaLine = context.resources.getQuantityString(R.plurals.lbl_n_songs, p.items.size, p.items.size),
             tracks = p.items.map(::importedSongOf),

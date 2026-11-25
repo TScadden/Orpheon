@@ -140,7 +140,9 @@ import com.music.spotui.ui.screens.rememberPlaylistDrag
 import com.music.spotui.ui.screens.TrackOrder
 import com.music.spotui.ui.screens.TrackSort
 import com.music.spotui.ui.viewmodel.PlayerViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** The framed sleeve on a release page, as a fraction of the page width. */
 private const val SLEEVE_FRACTION = 0.76f
@@ -313,6 +315,16 @@ private fun ImmersiveContextContent(navController: NavController, vm: ContextVie
     // Confirmations (and their Undo) float above the list, not inside a menu that closes.
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    // An imported list's own cover: picked here, copied into the app's files by PlaylistCovers.
+    val pickImportedCover = com.music.spotui.ui.components.rememberPlaylistCoverPicker { uri ->
+        scope.launch {
+            val path = withContext(Dispatchers.IO) { com.music.spotui.data.local.PlaylistCovers.save(context, uri) }
+            if (path != null) {
+                com.music.spotui.data.local.ImportedPlaylists.setCover(p.uri.substringAfterLast(':'), path)
+                vm.reload()
+            } else Toast.makeText(context, context.getString(R.string.local_cover_failed), Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // The row goes at once, then the removal is written. The snackbar keeps the mistake
     // reversible: Undo adds the track back and the page is read again.
@@ -351,6 +363,13 @@ private fun ImmersiveContextContent(navController: NavController, vm: ContextVie
     if (albumMenu) com.music.spotui.ui.components.AlbumOptionsSheet(p.uri, p.name, known = p) { albumMenu = false }
     if (importedMenu) com.music.spotui.ui.screens.ImportedPlaylistMenuSheet(
         name = p.name,
+        hasCover = com.music.spotui.data.local.ImportedPlaylists.playlists[p.uri.substringAfterLast(':')]?.cover?.isNotBlank() == true,
+        onChangeCover = { importedMenu = false; pickImportedCover() },
+        onRemoveCover = {
+            importedMenu = false
+            com.music.spotui.data.local.ImportedPlaylists.clearCover(p.uri.substringAfterLast(':'))
+            vm.reload()
+        },
         onRename = { importedMenu = false; importedRenaming = true },
         onDelete = {
             importedMenu = false

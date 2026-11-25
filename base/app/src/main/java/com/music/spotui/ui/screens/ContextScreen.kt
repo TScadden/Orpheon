@@ -661,6 +661,16 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
     // A11: confirmations (and their Undo) float above the list, not inside a menu that closes.
     val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    // An imported list's own cover: picked here, copied into the app's files by PlaylistCovers.
+    val pickImportedCover = com.music.spotui.ui.components.rememberPlaylistCoverPicker { uri ->
+        scope.launch {
+            val path = withContext(Dispatchers.IO) { com.music.spotui.data.local.PlaylistCovers.save(context, uri) }
+            if (path != null) {
+                com.music.spotui.data.local.ImportedPlaylists.setCover(p.uri.substringAfterLast(':'), path)
+                vm.reload()
+            } else android.widget.Toast.makeText(context, context.getString(R.string.local_cover_failed), android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // A11: the row goes at once, then the removal is written to Spotify. The snackbar keeps
     // the mistake reversible: Undo adds the track back and the page is read again.
@@ -716,6 +726,13 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
     if (albumMenu) com.music.spotui.ui.components.AlbumOptionsSheet(p.uri, p.name, known = p) { albumMenu = false }
     if (importedMenu) ImportedPlaylistMenuSheet(
         name = p.name,
+        hasCover = com.music.spotui.data.local.ImportedPlaylists.playlists[p.uri.substringAfterLast(':')]?.cover?.isNotBlank() == true,
+        onChangeCover = { importedMenu = false; pickImportedCover() },
+        onRemoveCover = {
+            importedMenu = false
+            com.music.spotui.data.local.ImportedPlaylists.clearCover(p.uri.substringAfterLast(':'))
+            vm.reload()
+        },
         onRename = { importedMenu = false; importedRenaming = true },
         onDelete = {
             importedMenu = false
@@ -1772,10 +1789,18 @@ private fun SimilarAlbums(navController: NavController, firstTrackId: String, al
     }
 }
 
-/** An imported playlist's page menu: rename it, or delete it from this phone. Nothing leaves the phone. */
+/** An imported playlist's page menu: rename it, give it a cover of its own, or delete it from this phone. Nothing leaves the phone. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-internal fun ImportedPlaylistMenuSheet(name: String, onRename: () -> Unit, onDelete: () -> Unit, onDismiss: () -> Unit) {
+internal fun ImportedPlaylistMenuSheet(
+    name: String,
+    hasCover: Boolean,
+    onChangeCover: () -> Unit,
+    onRemoveCover: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     com.music.spotui.ui.components.LookSheet(onDismissRequest = onDismiss, containerColor = tone(0xFF282828)) {
         Column(Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
             Text(name, color = AppText, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -1786,6 +1811,20 @@ internal fun ImportedPlaylistMenuSheet(name: String, onRename: () -> Unit, onDel
             ) {
                 Icon(androidx.compose.material.icons.Icons.Outlined.Edit, null, tint = AppMuted, modifier = Modifier.size(24.dp))
                 Text(stringResource(R.string.local_rename), color = AppText, fontSize = 16.sp, modifier = Modifier.padding(start = 16.dp))
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onChangeCover).padding(horizontal = 20.dp, vertical = 12.dp),
+            ) {
+                Icon(androidx.compose.material.icons.Icons.Outlined.Image, null, tint = AppMuted, modifier = Modifier.size(24.dp))
+                Text(stringResource(R.string.local_change_cover), color = AppText, fontSize = 16.sp, modifier = Modifier.padding(start = 16.dp))
+            }
+            if (hasCover) Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onRemoveCover).padding(horizontal = 20.dp, vertical = 12.dp),
+            ) {
+                Icon(androidx.compose.material.icons.Icons.Outlined.HideImage, null, tint = AppMuted, modifier = Modifier.size(24.dp))
+                Text(stringResource(R.string.local_remove_cover), color = AppText, fontSize = 16.sp, modifier = Modifier.padding(start = 16.dp))
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
