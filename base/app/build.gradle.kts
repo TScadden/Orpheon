@@ -34,7 +34,15 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
-            all { it.systemProperty("roborazzi.test.record", "true") }
+            all {
+                it.systemProperty("roborazzi.test.record", "true")
+                // Name failed tests (with their errors) in the build log: CI's uploaded
+                // test-report artifact has repeatedly missed this module's results.
+                it.testLogging {
+                    events("FAILED")
+                    exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+                }
+            }
         }
     }
     namespace = "app.myspoti.engine"
