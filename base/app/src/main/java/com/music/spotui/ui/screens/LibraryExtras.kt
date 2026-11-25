@@ -617,6 +617,8 @@ fun androidx.compose.foundation.lazy.LazyListScope.localItems(
     selection: Set<String>? = null,
     onToggle: (LocalItem) -> Unit = {},
     onEnterSelection: (LocalItem) -> Unit = {},
+    /** "Show album" for a row, where the screen can navigate (the row's album page). */
+    onShowAlbum: ((LocalItem) -> Unit)? = null,
 ) {
     itemsIndexed(items, key = { _, i -> i.key }) { index, item ->
         val np = SongPlayer.nowPlaying.value
@@ -638,6 +640,7 @@ fun androidx.compose.foundation.lazy.LazyListScope.localItems(
         if (menu) com.music.spotui.ui.components.LookSheet(onDismissRequest = { menu = false }, containerColor = SheetColor) {
             Column(Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
                 SheetRow(Icons.Outlined.Edit, stringResource(R.string.local_edit_title_artist)) { menu = false; editing = true }
+                if (onShowAlbum != null) SheetRow(androidx.compose.material.icons.filled.Album, stringResource(R.string.lbl_open_album)) { menu = false; onShowAlbum(item) }
                 SheetRow(Icons.Outlined.RemoveCircleOutline, stringResource(R.string.local_remove_from_playlist)) { menu = false; onRemove(item) }
             }
         }
@@ -766,6 +769,10 @@ fun LocalPlaylistScreen(navController: NavController, id: String) {
                     selection = selection,
                     onToggle = { selection = com.music.spotui.ui.components.MultiSelect.toggle(selection, it.key) },
                     onEnterSelection = { selection = setOf(it.key) },
+                    onShowAlbum = { item ->
+                        if (item.album.isNotBlank()) navController.navigate(com.music.spotui.ui.navigation.localAlbumRoute(item.artist, item.album))
+                        else Toast.makeText(context, context.getString(R.string.local_no_album), Toast.LENGTH_SHORT).show()
+                    },
                 )
             }
         }

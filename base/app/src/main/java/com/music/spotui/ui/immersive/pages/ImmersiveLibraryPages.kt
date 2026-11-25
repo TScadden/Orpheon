@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
@@ -213,6 +214,11 @@ fun ImmersiveLocalPlaylistScreen(navController: NavController, id: String) {
     rowMenu?.let { item ->
         ImmersiveSheet(onDismiss = { rowMenu = null }) {
             ImmersiveSheetRow(Icons.Rounded.Edit, stringResource(R.string.local_edit_title_artist), onClick = { rowMenu = null; rowEditing = item })
+            ImmersiveSheetRow(Icons.Rounded.Album, stringResource(R.string.lbl_open_album), onClick = {
+                rowMenu = null
+                if (item.album.isNotBlank()) navController.navigate(com.music.spotui.ui.navigation.localAlbumRoute(item.artist, item.album))
+                else android.widget.Toast.makeText(context, context.getString(R.string.local_no_album), android.widget.Toast.LENGTH_SHORT).show()
+            })
             ImmersiveSheetRow(Icons.Rounded.DeleteOutline, stringResource(R.string.local_remove_from_playlist), destructive = true, onClick = {
                 rowMenu = null
                 LocalPlaylists.remove(id, item.key)

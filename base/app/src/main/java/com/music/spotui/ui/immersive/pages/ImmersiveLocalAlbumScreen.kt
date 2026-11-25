@@ -1,0 +1,140 @@
+package com.music.spotui.ui.immersive.pages
+
+import android.widget.Toast
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.HideImage
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
+import com.music.spotui.R
+import com.music.spotui.data.local.LocalAlbums
+import com.music.spotui.data.local.LocalCovers
+import com.music.spotui.data.local.LocalItem
+import com.music.spotui.data.local.LocalMusic
+import com.music.spotui.data.local.LocalTrack
+import com.music.spotui.di.LocalPlayer
+import com.music.spotui.di.SongPlayer
+import com.music.spotui.ui.immersive.components.ImmersiveBarAction
+import com.music.spotui.ui.immersive.components.ImmersiveCover
+import com.music.spotui.ui.immersive.components.ImmersiveListRow
+import com.music.spotui.ui.immersive.components.ImmersiveMessageState
+import com.music.spotui.ui.immersive.components.ImmersivePage
+import com.music.spotui.ui.immersive.components.ImmersivePlayShuffleButtons
+import com.music.spotui.ui.immersive.sheets.ImmersiveSheet
+import com.music.spotui.ui.immersive.sheets.ImmersiveSheetRow
+import com.music.spotui.ui.theme.Immersive
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/**
+ * One album of the phone's own files, Immersive look: the files sharing the
+ * opened track's effective album name (see the Classic page of the same name).
+ * The album's cover is changed from the ⋯ menu (LocalCovers); a row's ⋯ edits
+ * the file's names and its own cover, as in Local Files.
+ */
+@Composable
+fun ImmersiveLocalAlbumScreen(navController: NavController, artist: String, album: String) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var tracks by remember { mutableStateOf<List<LocalTrack>?>(null) }
+    var menu by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<LocalItem?>(null) }
+    var coverTick by remember { mutableStateOf(0) }
+    LaunchedEffect(artist, album) {
+        tracks = LocalAlbums.tracksFor(LocalMusic.tracks(context), artist, album)
+    }
+    val albumCover = remember(coverTick, artist, album) { LocalCovers.albumCover(artist, album) }
+    val pickCover = com.music.spotui.ui.components.rememberPlaylistCoverPicker { uri ->
+        scope.launch {
+            val path = withContext(Dispatchers.IO) { LocalCovers.setAlbumCover(context, artist, album, uri) }
+            if (path != null) coverTick++
+            else Toast.makeText(context, context.getString(R.string.local_cover_failed), Toast.LENGTH_SHORT).show()
+        }
+    }
+    if (menu) ImmersiveSheet(onDismiss = { menu = false }) {
+        ImmersiveSheetRow(Icons.Rounded.Image, stringResource(R.string.local_change_cover), onClick = { menu = false; pickCover() })
+        if (albumCover != null) ImmersiveSheetRow(Icons.Rounded.HideImage, stringResource(R.string.local_remove_cover), onClick = {
+            menu = false
+            LocalCovers.clearAlbumCover(artist, album)
+            coverTick++
+        })
+    }
+    editing?.let { item ->
+        com.music.spotui.ui.screens.EditLocalItemDialog(item) {
+            editing = null
+            scope.launch { tracks = LocalAlbums.tracksFor(LocalMusic.tracks(context, refresh = true), artist, album) }
+        }
+    }
+    val list = tracks.orEmpty()
+    val np by SongPlayer.nowPlaying
+    ImmersivePage(
+        title = album,
+        subtitle = listOfNotNull(artist.takeIf { it.isNotBlank() },
+            pluralStringResource(R.plurals.lbl_n_songs_s, list.size, list.size.toString()).takeIf { tracks != null })
+            .joinToString(" • ").ifBlank { null },
+        onBack = { navController.navigateUp() },
+        actions = {
+            ImmersiveBarAction(Icons.Rounded.MoreHoriz, stringResource(R.string.lbl_more), onClick = { menu = true })
+        },
+    ) {
+        if (tracks != null && list.isEmpty()) {
+            item(key = "empty") { ImmersiveMessageState(stringResource(R.string.local_album_empty)) }
+            return@ImmersivePage
+        }
+        if (tracks == null) return@ImmersivePage
+        item(key = "cover") {
+            Box(Modifier.fillMaxWidth().padding(horizontal = Immersive.Gutter, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                ImmersiveCover(
+                    albumCover?.let { java.io.File(it).toURI().toString() } ?: list.firstOrNull()?.artUri?.toString(),
+                    Modifier.fillMaxWidth(0.62f).aspectRatio(1f),
+                    Immersive.CoverLarge,
+                )
+            }
+        }
+        item(key = "buttons") {
+            ImmersivePlayShuffleButtons(
+                onPlay = {
+                    val playingHere = LocalPlayer.active.value && LocalPlayer.contextName == album
+                    when {
+                        playingHere && SongPlayer.isPlaying() -> SongPlayer.pause()
+                        playingHere -> SongPlayer.play()
+                        else -> LocalPlayer.play(list, 0, context = album)
+                    }
+                },
+                onShuffle = { LocalPlayer.play(list, list.indices.random(), shuffle = true, context = album) },
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+        }
+        items(list.size, key = { i -> list[i].id }) { index ->
+            val t = list[index]
+            val current = LocalPlayer.active.value && np.uri == "local:${t.id}"
+            ImmersiveListRow(
+                title = t.title,
+                subtitle = t.artist.ifBlank { null },
+                imageUrl = t.artUri.toString(),
+                round = false,
+                playing = current && SongPlayer.isPlaying(),
+                onClick = { LocalPlayer.play(list, index, context = album) },
+                onMore = { editing = LocalItem.of(t) },
+            )
+        }
+    }
+}

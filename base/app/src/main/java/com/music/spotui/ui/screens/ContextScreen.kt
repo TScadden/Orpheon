@@ -1231,7 +1231,11 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
                     Text(stringResource(R.string.local_added_section), color = AppText, fontSize = 18.sp, fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(16.dp, 20.dp, 16.dp, 4.dp))
                 }
-                localItems(additions, p.name, onRemove = { com.music.spotui.data.local.LocalPlaylists.removeFromSpotify(playlistId, it.key) })
+                localItems(additions, p.name, onRemove = { com.music.spotui.data.local.LocalPlaylists.removeFromSpotify(playlistId, it.key) },
+                    onShowAlbum = { item ->
+                        if (item.album.isNotBlank()) navController.navigate(com.music.spotui.ui.navigation.localAlbumRoute(item.artist, item.album))
+                        else android.widget.Toast.makeText(context, context.getString(R.string.local_no_album), android.widget.Toast.LENGTH_SHORT).show()
+                    })
             }
         }
         // An album: Spotify's "More like this", albums close to its first song.
