@@ -80,7 +80,7 @@ internal object SettingsSearch {
         SettingsEntry(R.string.settings_section_data, 0, "Data"),
         SettingsEntry(R.string.settings_section_storage, 0, "Storage"),
         SettingsEntry(R.string.settings_section_app, 0, "App"),
-        SettingsEntry(R.string.supporter_accent, 0, "Display"),
+        SettingsEntry(R.string.accent_colour, 0, "Display"),
     )
 
     val classic: List<SettingsEntry> = listOf(
@@ -125,7 +125,7 @@ internal object SettingsSearch {
         SettingsEntry(R.string.settings_section_storage, 0, "3"),
         SettingsEntry(R.string.settings_tab_appearance, 0, "4"),
         SettingsEntry(R.string.settings_section_display, 0, "4"),
-        SettingsEntry(R.string.supporter_accent, 0, "4"),
+        SettingsEntry(R.string.accent_colour, 0, "4"),
         SettingsEntry(R.string.settings_look_title, 0, "4"),
         SettingsEntry(R.string.settings_rotation_title, 0, "4"),
         SettingsEntry(R.string.lbl_language, 0, "4"),

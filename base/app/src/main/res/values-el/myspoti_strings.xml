@@ -98,7 +98,7 @@
     <string name="supporter_thanks_title">Ευχαριστούμε για τη στήριξή σου!</string>
     <string name="supporter_thanks_body">Αν το Scadify εξακολουθεί να σου είναι χρήσιμο, μια νέα μικρή δωρεά βοηθά να συνεχίσει.</string>
     <string name="support_again">Στήριξε ξανά</string>
-    <string name="supporter_accent">Χρώμα τόνου</string>
+    <string name="accent_colour">Χρώμα τόνου</string>
     <string name="supporter_icon">Εικονίδιο εφαρμογής</string>
     <string name="supporter_icon_note">Όταν αλλάζει το εικονίδιο, η συντόμευσή του στην αρχική οθόνη μπορεί να χαθεί: η εφαρμογή παραμένει στη λίστα εφαρμογών σου.</string>
     <string name="supporter_monthly_switch">Στηρίζω κάθε μήνα (χωρίς άλλες υπενθυμίσεις)</string>

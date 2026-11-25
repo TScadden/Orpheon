@@ -123,7 +123,7 @@
     <string name="supporter_thanks_title">Merci pour votre soutien !</string>
     <string name="supporter_thanks_body">Si Scadify vous sert toujours, un nouveau petit don aide à continuer.</string>
     <string name="support_again">Soutenir à nouveau</string>
-    <string name="supporter_accent">Couleur d\'accent</string>
+    <string name="accent_colour">Couleur d\'accent</string>
     <string name="supporter_icon">Icône de l\'app</string>
     <string name="supporter_icon_note">Au changement d\'icône, le raccourci de l\'écran d\'accueil peut disparaître : l\'app reste dans la liste des applications.</string>
     <string name="supporter_monthly_switch">Je soutiens chaque mois (plus de rappels)</string>

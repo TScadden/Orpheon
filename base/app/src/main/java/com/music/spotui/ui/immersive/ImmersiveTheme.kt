@@ -31,7 +31,7 @@ object Immersive {
     val TextTertiary = Color.White.copy(alpha = 0.38f)
     /** The look's own pink until an Immersive accent colour is chosen in Settings, then that colour (links, the selected tab, toggles). */
     val Accent: Color get() = com.music.spotui.extensions.ExtensionLook.color(app.myspoti.extensions.UiStyle.ACCENT)
-        ?: com.music.spotui.data.api.SupportReminder.run { if (immersiveAccentChosen) immersiveAccent.color else Color(0xFFFF4F7B) }
+        ?: com.music.spotui.data.preferences.AccentPref.run { if (immersiveAccentChosen) immersiveAccent.color else Color(0xFFFF4F7B) }
     val GlassFill = Color(0xFF2C2C34).copy(alpha = 0.88f)
     val GlassEdge = Color.White.copy(alpha = 0.12f)
     /** The red of a destructive swipe, menu entry or confirmation (Leave, Remove, an error). */

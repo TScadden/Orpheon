@@ -104,7 +104,7 @@
     <string name="supporter_thanks_title">感谢你的支持！</string>
     <string name="supporter_thanks_body">如果 Scadify 仍然对你有帮助，再次小额捐助能帮助它继续下去。</string>
     <string name="support_again">再次支持</string>
-    <string name="supporter_accent">强调色</string>
+    <string name="accent_colour">强调色</string>
     <string name="supporter_icon">应用图标</string>
     <string name="supporter_icon_note">更换图标后，其主屏幕快捷方式可能会消失：应用仍保留在应用列表中。</string>
     <string name="supporter_monthly_switch">我每月支持（不再提醒）</string>

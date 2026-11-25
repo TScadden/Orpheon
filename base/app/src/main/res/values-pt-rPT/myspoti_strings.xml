@@ -95,7 +95,7 @@
     <string name="supporter_thanks_title">Obrigado pelo teu apoio!</string>
     <string name="supporter_thanks_body">Se o Scadify continua a ser útil, um novo pequeno donativo ajuda a mantê-lo a funcionar.</string>
     <string name="support_again">Apoiar novamente</string>
-    <string name="supporter_accent">Cor de destaque</string>
+    <string name="accent_colour">Cor de destaque</string>
     <string name="supporter_icon">Ícone da app</string>
     <string name="supporter_icon_note">Ao mudar o ícone, o atalho do ecrã principal pode desaparecer: a app continua na lista de aplicações.</string>
     <string name="supporter_monthly_switch">Apoio todos os meses (sem mais lembretes)</string>

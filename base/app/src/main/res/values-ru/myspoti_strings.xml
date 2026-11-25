@@ -107,7 +107,7 @@
     <string name="supporter_thanks_title">Спасибо за поддержку!</string>
     <string name="supporter_thanks_body">Если Scadify по-прежнему вам полезен, новое небольшое пожертвование поможет проекту жить дальше.</string>
     <string name="support_again">Поддержать ещё раз</string>
-    <string name="supporter_accent">Цвет акцента</string>
+    <string name="accent_colour">Цвет акцента</string>
     <string name="supporter_icon">Значок приложения</string>
     <string name="supporter_icon_note">При смене значка ярлык на главном экране может исчезнуть: приложение останется в списке приложений.</string>
     <string name="supporter_monthly_switch">Я поддерживаю каждый месяц (без напоминаний)</string>
