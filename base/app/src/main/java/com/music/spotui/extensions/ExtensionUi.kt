@@ -1,5 +1,10 @@
 package com.music.spotui.extensions
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Rect
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -9,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -91,6 +97,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -111,6 +118,8 @@ import app.myspoti.extensions.Target
 import app.myspoti.extensions.TextStyle
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
+import com.bumptech.glide.load.engine.bitmap_recycle.BitmapPool
+import com.bumptech.glide.load.resource.bitmap.BitmapTransformation
 import com.music.spotui.ui.theme.AppAccent
 import com.music.spotui.ui.theme.AppMuted
 import com.music.spotui.ui.theme.AppText
@@ -304,6 +313,64 @@ private fun tapped(owner: String, target: Target?, surface: Surface, context: St
     target.action?.let { Extensions.tap(owner, surface, it, context) }
 }
 
+// ── The corner patch for baked-in source marks ──
+
+/**
+ * The Fresh Home extension: its feed artwork is sourced from Audius, whose logo is
+ * baked into the pictures themselves (the app draws no source badge anywhere —
+ * the mark is in the remote image). The block model carries no per-item source,
+ * so the patch scopes to this extension's feed card surfaces, in both looks
+ * (this renderer is shared), and nowhere else: not local art, not album pages,
+ * not the player.
+ */
+private fun isFreshHome(owner: String): Boolean = owner.contains("freshhome", ignoreCase = true)
+
+/** The corner the baked-in mark sits in, as a fraction of the artwork (Tyson's screenshot: the top-left ~18%). */
+private const val FEED_MARK_FRACTION = 0.18f
+
+/**
+ * A wash of a picture's own colours: the bottom-right region (which never carries
+ * the top-left mark), shrunk to a few pixels and stretched back over the patch, so
+ * the cover-up blends with the artwork it covers.
+ */
+private object PatchSampleTransformation : BitmapTransformation() {
+    private val ID = "com.music.spotui.PatchSample"
+
+    override fun transform(pool: BitmapPool, toTransform: Bitmap, outWidth: Int, outHeight: Int): Bitmap {
+        val side = (minOf(toTransform.width, toTransform.height) / 2).coerceAtLeast(1)
+        val region = Bitmap.createBitmap(toTransform, toTransform.width - side, toTransform.height - side, side, side)
+        val tiny = Bitmap.createScaledBitmap(region, 6, 6, true)
+        val out = pool.get(outWidth.coerceAtLeast(1), outHeight.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        Canvas(out).drawBitmap(tiny, null, Rect(0, 0, out.width, out.height), Paint(Paint.FILTER_BITMAP_FLAG))
+        return out
+    }
+
+    override fun updateDiskCacheKey(messageDigest: java.security.MessageDigest) {
+        messageDigest.update(ID.toByteArray(Charsets.UTF_8))
+    }
+}
+
+/**
+ * Covers a feed card's top-left corner — where the source's mark is baked into the
+ * artwork — with the artwork's own blended wash and the Scadify S over it.
+ * Display-time only: the picture underneath is untouched.
+ */
+@OptIn(ExperimentalGlideComposeApi::class)
+@Composable
+private fun BakedMarkPatch(model: Any?, modifier: Modifier = Modifier) {
+    Box(modifier) {
+        GlideImage(
+            model = model, contentDescription = null, contentScale = ContentScale.Crop,
+            requestBuilderTransform = { it.transform(PatchSampleTransformation) },
+            modifier = Modifier.matchParentSize(),
+        )
+        Image(
+            painter = painterResource(R.drawable.scadify_mark), contentDescription = null,
+            modifier = Modifier.matchParentSize(),
+        )
+    }
+}
+
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 private fun BlockView(owner: String, b: Block, surface: Surface, context: String) {
@@ -326,17 +393,24 @@ private fun BlockView(owner: String, b: Block, surface: Surface, context: String
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).clip(RoundedCornerShape(10.dp))
                 .background(tone(0xFF242424)).clickable(enabled = b.target != null) { tapped(owner, b.target, surface, context) }.padding(10.dp),
         ) {
-            b.image?.let { GlideImage(model = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(56.dp).clip(RoundedCornerShape(6.dp))) }
+            b.image?.let { img ->
+                Box(Modifier.size(56.dp).clip(RoundedCornerShape(6.dp))) {
+                    GlideImage(model = img, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
+                    if (isFreshHome(owner)) BakedMarkPatch(img, Modifier.fillMaxSize(FEED_MARK_FRACTION).align(Alignment.TopStart))
+                }
+            }
             Column(Modifier.padding(start = if (b.image != null) 12.dp else 0.dp)) {
                 Text(b.title, color = AppText, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 b.subtitle?.let { Text(it, color = AppMuted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
             }
         }
-        is Block.Image -> GlideImage(
-            model = b.url, contentDescription = null, contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).aspectRatio(b.ratio).clip(RoundedCornerShape(10.dp))
+        is Block.Image -> Box(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).aspectRatio(b.ratio).clip(RoundedCornerShape(10.dp))
                 .clickable(enabled = b.target != null) { tapped(owner, b.target, surface, context) },
-        )
+        ) {
+            GlideImage(model = b.url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
+            if (isFreshHome(owner)) BakedMarkPatch(b.url, Modifier.fillMaxSize(FEED_MARK_FRACTION).align(Alignment.TopStart))
+        }
         is Block.Button -> ExtButton(b.label, b.icon, Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) { Extensions.tap(owner, surface, b.action, context) }
         is Block.MenuEntry -> MenuEntryRow(owner, b, showOwner = false) { Extensions.tap(owner, surface, b.action, context) }
         is Block.Items -> {
@@ -356,8 +430,13 @@ private fun BlockView(owner: String, b: Block, surface: Surface, context: String
             } else Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp)) {
                 b.items.forEach { item ->
                     Column(Modifier.width(140.dp).clickable { openFromExtension(item.uri) }.padding(6.dp)) {
-                        GlideImage(model = item.image, contentDescription = null, contentScale = ContentScale.Crop,
-                            modifier = Modifier.size(128.dp).clip(if (b.kind == ItemKind.ARTISTS) CircleShape else RoundedCornerShape(8.dp)).background(tone(0xFF2A2A2A)))
+                        Box(Modifier.size(128.dp).clip(if (b.kind == ItemKind.ARTISTS) CircleShape else RoundedCornerShape(8.dp)).background(tone(0xFF2A2A2A))) {
+                            GlideImage(model = item.image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
+                            // Artist circles take no square patch (it would paint past the circle).
+                            if (isFreshHome(owner) && b.kind != ItemKind.ARTISTS) {
+                                BakedMarkPatch(item.image, Modifier.fillMaxSize(FEED_MARK_FRACTION).align(Alignment.TopStart))
+                            }
+                        }
                         Text(item.title, color = AppText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
                         item.subtitle?.let { Text(it, color = AppMuted, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
                     }
