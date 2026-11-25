@@ -27,7 +27,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Pause
@@ -193,16 +196,40 @@ fun ImmersiveLocalFilesScreen(navController: NavController) {
         onChanged = { scope.launch { tracks = LocalMusic.tracks(context) } },
         onDismiss = { choosingFolders = false },
     )
+    // Multi-select (a long press starts it): the chosen tracks, by their MediaStore id.
+    // While it runs the page's own bar carries it: the count for a title, back leaves it,
+    // and its actions are Select all, Add to playlist and Close.
+    var selection by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var addingSelected by remember { mutableStateOf(false) }
+    val selecting = selection.isNotEmpty()
+    androidx.activity.compose.BackHandler(enabled = selecting) { selection = emptySet() }
+    if (addingSelected) com.music.spotui.ui.screens.AddLocalTracksToPlaylistSheet(
+        tracks = tracks.orEmpty().filter { it.id in selection },
+        onDismiss = { addingSelected = false; selection = emptySet() },
+    )
 
     val title = stringResource(R.string.lbl_local_files)
     val n = tracks?.size ?: 0
     ImmersivePage(
-        title = title,
-        subtitle = if (granted && tracks != null) pluralStringResource(R.plurals.local_files_count, n, n) else null,
-        onBack = { navController.popBackStack() },
-        actions = if (granted) {
-            { ImmersiveBarAction(Icons.Rounded.Folder, stringResource(R.string.local_folders_button), onClick = { choosingFolders = true }) }
-        } else null,
+        title = if (selecting) stringResource(R.string.select_selected_count, selection.size) else title,
+        subtitle = if (!selecting && granted && tracks != null) pluralStringResource(R.plurals.local_files_count, n, n) else null,
+        onBack = { if (selecting) selection = emptySet() else navController.popBackStack() },
+        actions = when {
+            selecting -> {
+                {
+                    ImmersiveBarAction(Icons.Rounded.SelectAll, stringResource(R.string.select_all), onClick = {
+                        val shown = tracks.orEmpty().filter { com.music.spotui.ui.components.matchesFind(find, it.title, it.artist, it.album) }
+                        selection = com.music.spotui.ui.components.MultiSelect.selectAll(selection, shown.map { it.id })
+                    })
+                    ImmersiveBarAction(Icons.AutoMirrored.Rounded.PlaylistAdd, stringResource(R.string.lbl_add_to_playlist), onClick = { addingSelected = true })
+                    ImmersiveBarAction(Icons.Rounded.Close, stringResource(R.string.select_cancel), onClick = { selection = emptySet() })
+                }
+            }
+            granted -> {
+                { ImmersiveBarAction(Icons.Rounded.Folder, stringResource(R.string.local_folders_button), onClick = { choosingFolders = true }) }
+            }
+            else -> null
+        },
     ) {
         when {
             !granted -> item(key = "permission") {
@@ -251,8 +278,16 @@ fun ImmersiveLocalFilesScreen(navController: NavController) {
                             title = t.title, subtitle = t.artist.ifBlank { null }, imageUrl = t.artUri.toString(), round = false,
                             playing = current,
                             // The whole folder plays from this song, even when the list is filtered.
-                            onClick = { tracks?.let { all -> LocalPlayer.play(all, all.indexOf(t).coerceAtLeast(0)) } },
-                            onMore = { adding = t },
+                            // While selecting, a tap chooses instead of playing.
+                            onClick = {
+                                if (selecting) selection = com.music.spotui.ui.components.MultiSelect.toggle(selection, t.id)
+                                else tracks?.let { all -> LocalPlayer.play(all, all.indexOf(t).coerceAtLeast(0)) }
+                            },
+                            onMore = if (selecting) null else ({ adding = t }),
+                            onLongClick = {
+                                selection = if (selecting) com.music.spotui.ui.components.MultiSelect.toggle(selection, t.id) else setOf(t.id)
+                            },
+                            selected = if (selecting) t.id in selection else null,
                         )
                     }
                 }
