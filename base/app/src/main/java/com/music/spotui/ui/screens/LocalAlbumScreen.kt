@@ -55,7 +55,7 @@ import androidx.navigation.NavController
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
 import com.bumptech.glide.integration.compose.placeholder
-import com.music.spotui.R
+import app.myspoti.engine.R
 import com.music.spotui.data.local.LocalAlbums
 import com.music.spotui.data.local.LocalCovers
 import com.music.spotui.data.local.LocalMusic
@@ -79,7 +79,7 @@ import kotlinx.coroutines.withContext
  * album's cover is set here (LocalCovers, keyed by artist + album); the rows
  * are Local Files rows: tap plays, heart likes, + adds to a playlist, ⋮ edits.
  */
-@OptIn(ExperimentalGlideComposeApi::class)
+@OptIn(ExperimentalGlideComposeApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun LocalAlbumScreen(navController: NavController, artist: String, album: String) {
     val context = LocalContext.current

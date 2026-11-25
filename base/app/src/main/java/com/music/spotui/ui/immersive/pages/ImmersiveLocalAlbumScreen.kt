@@ -23,7 +23,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import com.music.spotui.R
+import app.myspoti.engine.R
 import com.music.spotui.data.local.LocalAlbums
 import com.music.spotui.data.local.LocalCovers
 import com.music.spotui.data.local.LocalItem
@@ -31,12 +31,11 @@ import com.music.spotui.data.local.LocalMusic
 import com.music.spotui.data.local.LocalTrack
 import com.music.spotui.di.LocalPlayer
 import com.music.spotui.di.SongPlayer
-import com.music.spotui.ui.immersive.components.ImmersiveBarAction
 import com.music.spotui.ui.immersive.components.ImmersiveCover
 import com.music.spotui.ui.immersive.components.ImmersiveListRow
 import com.music.spotui.ui.immersive.components.ImmersiveMessageState
-import com.music.spotui.ui.immersive.components.ImmersivePage
 import com.music.spotui.ui.immersive.components.ImmersivePlayShuffleButtons
+import com.music.spotui.ui.immersive.shell.ImmersiveBarAction
 import com.music.spotui.ui.immersive.sheets.ImmersiveSheet
 import com.music.spotui.ui.immersive.sheets.ImmersiveSheetRow
 import com.music.spotui.ui.immersive.Immersive

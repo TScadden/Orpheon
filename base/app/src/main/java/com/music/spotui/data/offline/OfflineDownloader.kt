@@ -549,23 +549,21 @@ object OfflineDownloader {
      * the catalog has nothing for it.
      */
     private suspend fun catalogMeta(r: Request, meta: Meta): Meta {
-        val provider = com.music.spotui.catalog.CatalogRuntime.providerOfKey(r.trackId) ?: return meta
-        val key = com.music.spotui.catalog.CatalogRuntime.uriOfKey(r.trackId) ?: return meta
-        val chain = com.music.spotui.catalog.CatalogRuntime.chain()
-        var hit = runCatching { chain.providerOf(provider)?.track(key.id) }
+        val uri = com.music.spotui.data.catalog.CatalogRuntime.uriOfKey(r.trackId) ?: return meta
+        val item = runCatching { app.myspoti.catalog.ItemUri.parse(uri) }.getOrNull() ?: return meta
+        val chain = com.music.spotui.data.catalog.CatalogRuntime.chain()
+        var hit = runCatching { chain.providerOf(item.provider)?.track(item.id) }
             .onFailure { Log.w(TAG, "${r.title}: catalog track: $it") }.getOrNull()
         if (hit == null && r.title.isNotBlank()) {
             hit = runCatching { chain.resolve(r.title, r.artist, r.durationMs, null) }
                 .onFailure { Log.w(TAG, "${r.title}: catalog resolve: $it") }.getOrNull()
         }
         hit ?: return meta
-        var spotifyHit: com.music.spotui.catalog.Hit? = null
-        val spotifyId = hit.onProvider("spotify") ?: runCatching {
-            chain.resolve(hit.track.name, hit.track.artist, hit.track.durationMs, hit.isrc)
-        }.getOrNull()?.onProvider("spotify")
-        if (spotifyId != null && spotifyId != hit.track.id) {
-            spotifyHit = runCatching { chain.providerOf("spotify")?.track(spotifyId) }.getOrNull()
-        }
+        // The same recording on Spotify, when the chain carries a Spotify provider
+        // (the accountless chain does not: the provider's ISRC is then the match).
+        val spotifyHit = if (item.provider == "spotify") null else runCatching {
+            chain.counterpartOn("spotify", hit.track.name, hit.track.artists.firstOrNull()?.name.orEmpty(), hit.track.durationMs, hit.isrc)
+        }.onFailure { Log.w(TAG, "${r.title}: spotify counterpart: $it") }.getOrNull()
         val dm = DownloadMeta.merge(
             DownloadMeta(
                 downloadId = r.trackId, isrc = meta.isrc, title = meta.title, artist = meta.artist,
@@ -573,7 +571,7 @@ object OfflineDownloader {
             ),
             hit, spotifyHit,
         )
-        Log.i(TAG, "${r.title}: catalog meta via ${hit.provider}: isrc=${dm.isrc ?: "-"}, downloadId=${dm.downloadId}")
+        Log.i(TAG, "${r.title}: catalog meta via ${item.provider}: isrc=${dm.isrc ?: "-"}, downloadId=${dm.downloadId}")
         return Meta(
             title = dm.title, artist = dm.artist, album = dm.album, albumId = dm.albumId,
             durationMs = dm.durationMs, coverUrl = dm.coverUrl.orEmpty(), isrc = dm.isrc,

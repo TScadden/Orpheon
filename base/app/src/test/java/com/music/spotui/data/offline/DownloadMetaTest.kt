@@ -1,7 +1,10 @@
 package com.music.spotui.data.offline
 
-import com.music.spotui.catalog.Hit
-import com.music.spotui.catalog.Track
+import app.myspoti.api.AlbumRef
+import app.myspoti.api.ArtistRef
+import app.myspoti.api.Image
+import app.myspoti.api.Track
+import app.myspoti.catalog.Hit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -15,21 +18,19 @@ class DownloadMetaTest {
         album = "", albumId = "", durationMs = 0L, coverUrl = "https://img/base.jpg",
     )
 
+    private fun track(uri: String, name: String, artist: String, album: String, albumUri: String, durationMs: Long, cover: String?) = Track(
+        uri = uri, name = name, durationMs = durationMs,
+        artists = listOf(ArtistRef("$uri:artist", artist)),
+        album = AlbumRef(albumUri, album, listOfNotNull(cover?.let { Image(it, 640, 640) })),
+    )
+
     private fun deezerHit() = Hit(
-        Track(
-            id = "3135556", name = "A PLACE TO GO", artist = "The Kid LAROI",
-            album = "A PLACE TO GO", albumId = "99", durationMs = 163_000L,
-            coverUrl = "https://img/deezer.jpg",
-        ),
+        track("deezer:track:3135556", "A PLACE TO GO", "The Kid LAROI", "A PLACE TO GO", "deezer:album:99", 163_000L, "https://img/deezer.jpg"),
         isrc = "AU-UM7-24-00551",
     )
 
     private fun spotifyHit() = Hit(
-        Track(
-            id = "4uLU6hMCjMI75M1A2tKUQC", name = "A PLACE TO GO", artist = "The Kid LAROI",
-            album = "A PLACE TO GO", albumId = "5rFKwPqnBziMYLdnD5rIXG", durationMs = 163_400L,
-            coverUrl = "https://img/spotify.jpg",
-        ),
+        track("spotify:track:4uLU6hMCjMI75M1A2tKUQC", "A PLACE TO GO", "The Kid LAROI", "A PLACE TO GO", "spotify:album:5rFKwPqnBziMYLdnD5rIXG", 163_400L, "https://img/spotify.jpg"),
         isrc = "AUUM72400551",
     )
 
@@ -40,6 +41,7 @@ class DownloadMetaTest {
         // No Spotify counterpart: the download is still asked for by the provider key.
         assertEquals("deezer.3135556", m.downloadId)
         assertEquals("A PLACE TO GO", m.title)
+        assertEquals("The Kid LAROI", m.artist)
         assertEquals("A PLACE TO GO", m.album)
         assertEquals(163_000L, m.durationMs)
         assertEquals("https://img/deezer.jpg", m.coverUrl)
@@ -65,7 +67,7 @@ class DownloadMetaTest {
 
     @Test fun blanksInTheHitKeepTheRequestsOwnValues() {
         val sparse = Hit(
-            Track(id = "3135556", name = "", artist = "", album = "", albumId = "", durationMs = 0L, coverUrl = null),
+            Track(uri = "deezer:track:3135556", name = "", durationMs = 0L, artists = emptyList(), album = null),
             isrc = null,
         )
         val m = DownloadMeta.merge(base(), sparse, null)

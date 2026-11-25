@@ -39,6 +39,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.outlined.PlaylistPlay
 import androidx.compose.material.icons.automirrored.outlined.QueueMusic
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
@@ -640,7 +641,7 @@ fun androidx.compose.foundation.lazy.LazyListScope.localItems(
         if (menu) com.music.spotui.ui.components.LookSheet(onDismissRequest = { menu = false }, containerColor = SheetColor) {
             Column(Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
                 SheetRow(Icons.Outlined.Edit, stringResource(R.string.local_edit_title_artist)) { menu = false; editing = true }
-                if (onShowAlbum != null) SheetRow(androidx.compose.material.icons.filled.Album, stringResource(R.string.lbl_open_album)) { menu = false; onShowAlbum(item) }
+                if (onShowAlbum != null) SheetRow(Icons.Default.Album, stringResource(R.string.lbl_open_album)) { menu = false; onShowAlbum(item) }
                 SheetRow(Icons.Outlined.RemoveCircleOutline, stringResource(R.string.local_remove_from_playlist)) { menu = false; onRemove(item) }
             }
         }
