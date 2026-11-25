@@ -10,6 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * Phone mode's watch side: the phone's now-playing payload as the watch reads it (the phone
@@ -18,6 +19,7 @@ import org.robolectric.RobolectricTestRunner
  * Robolectric only for a working Base64.
  */
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class PhoneModeTest {
 
     @Test fun parsesThePhonesPayload() {
