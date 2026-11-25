@@ -61,6 +61,41 @@ object HookDispatch {
         }
     }
 
+    /**
+     * [firstInOrderWithin] with a fit check: the first answer in [candidates]' order that [fits]
+     * wins. An answer that does not fit is passed over — the candidates below it are awaited
+     * (each within its own limit), not cut off by it; once one that fits is in hand, the ones
+     * above it still asking get [graceMs], as in [firstInOrderWithin], then the highest fitting
+     * answer in hand wins. When every candidate has answered and none fits, the answer closest
+     * to what was wanted ([distance], smaller is closer; ties to the earlier candidate) is taken
+     * instead of none, so a wrong answer never becomes a dead end. Null only when nobody
+     * answered at all.
+     */
+    suspend fun <C, R : Any> firstFittingInOrderWithin(candidates: List<C>, graceMs: Long, fits: (R) -> Boolean, distance: (R) -> Long, ask: suspend (C) -> R?): Pair<C, R>? = coroutineScope {
+        val asked = candidates.map { c -> async { answer { ask(c) } } }
+        val done = BooleanArray(asked.size)
+        val results = arrayOfNulls<Any>(asked.size)
+        suspend fun awaitOne() = select<Unit> {
+            asked.forEachIndexed { i, d -> if (!done[i]) d.onAwait { done[i] = true; results[i] = it } }
+        }
+        @Suppress("UNCHECKED_CAST")
+        fun result(i: Int) = results[i] as R?
+        fun best() = results.indices.firstOrNull { i -> result(i)?.let(fits) == true }
+        // The best fitting answer is final when every candidate above it is done.
+        fun settled() = best()?.let { b -> (0 until b).all { done[it] } } == true
+        try {
+            while (best() == null && done.any { !it }) awaitOne()
+            if (best() == null) return@coroutineScope results.indices.filter { results[it] != null }
+                .minWithOrNull(compareBy<Int> { distance(result(it)!!) }.thenBy { it })
+                ?.let { candidates[it] to result(it)!! }
+            if (!settled()) withTimeoutOrNull(graceMs) { while (!settled()) awaitOne() }
+            val b = best()!!
+            candidates[b] to result(b)!!
+        } finally {
+            asked.forEach { it.cancel() }
+        }
+    }
+
     /** The best answer by [rank] (higher is better), ties to the earlier candidate. Waits for all. */
     suspend fun <C, R : Any> bestInOrder(candidates: List<C>, rank: (R) -> Int, ask: suspend (C) -> R?): Pair<C, R>? = coroutineScope {
         val asked = candidates.map { c -> c to async { answer { ask(c) } } }
