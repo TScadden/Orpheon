@@ -15,17 +15,22 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.google.android.horologist.audio.ui.VolumeUiState
+import com.google.android.horologist.images.base.paintable.BitmapPaintable
+import com.google.android.horologist.images.coil.CoilPaintable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 
 /**
- * The watch's two pages: what plays (its name, its artists, previous, play or pause, next, the
- * volume), then, a swipe away, the account's playlists as the phone lists them; a tap plays one
- * on the watch from its own extensions ([WatchPlay]).
+ * The watch's pages: what plays (its name, its artists, previous, play or pause, next, the
+ * volume), then, a swipe away, the playlists as the phone lists them — a tap plays one on the
+ * watch from its own extensions ([WatchPlay]) — and the mode switch. Two modes ([WatchModes]):
+ * Phone, where the player page mirrors the phone's song and its buttons drive the phone's
+ * player; Watch, where the watch plays on its own.
  */
 class WatchActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,12 +45,14 @@ class WatchActivity : ComponentActivity() {
 @Composable
 internal fun WatchApp() {
     val context = LocalContext.current
+    val app = context.applicationContext
     val localNow by WatchLocal.now.collectAsState()
     var error by remember { mutableStateOf<String?>(null) }
     val extensions by WatchExtensions.installed.collectAsState()
     val ui = rememberCoroutineScope()
     var syncNote by remember { mutableStateOf<String?>(null) }
-    remember { WatchExtensions.init(context.applicationContext) }
+    remember { WatchExtensions.init(app); WatchModes.init(app); PhonePlayingState.load(app) }
+    val mode by WatchModes.mode.collectAsState()
     // The extensions' player gives no position on its own: read every second while it has a song.
     val local = localNow
     var localPosition by remember { mutableStateOf<WatchPosition?>(null) }
@@ -53,20 +60,58 @@ internal fun WatchApp() {
         while (local != null) { localPosition = WatchLocal.position(); delay(1_000) }
         localPosition = null
     }
-    val playing = local?.let {
+    val watchPlaying = local?.let {
         val p = localPosition
         WatchPlaying(it.name, it.artists, it.playing, it.source, it.cover, p?.positionMs ?: 0L, p?.durationMs ?: 0L, SystemClock.elapsedRealtime(), p?.buffering == true)
     }
+    // Phone mode: the phone's song, asked for on entering the mode and refreshed while in it
+    // (its pushes land in the same state between asks).
+    val phone by PhonePlayingState.state.collectAsState()
+    var phoneError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(mode) {
+        if (mode != WatchMode.PHONE) return@LaunchedEffect
+        // Phone mode is the phone's stage: the watch's own player falls silent.
+        if (WatchLocal.active) WatchLocal.stop()
+        while (true) {
+            runCatching { PhoneLink(app).nowPlaying() }
+                .onSuccess { phoneError = null }
+                .onFailure { if (PhonePlayingState.state.value?.hasSong != true) phoneError = context.getString(R.string.wear_no_phone) }
+            delay(10_000)
+        }
+    }
+    fun phoneControl(command: String) {
+        ui.launch {
+            runCatching { PhoneLink(app).control(command) }
+                .onSuccess { phoneError = null }
+                .onFailure { phoneError = context.getString(R.string.wear_no_phone) }
+        }
+    }
+    val phonePlaying = phone?.takeIf { it.hasSong }?.let {
+        WatchPlaying(it.title, it.artist, it.playing, stringResource(R.string.wear_on_phone), it.coverUrl,
+            it.positionMs, it.durationMs, PhonePlayingState.atElapsedMs, buffering = false)
+    }
+    val playing = if (mode == WatchMode.PHONE) phonePlaying else watchPlaying
+    // The phone's sleeve itself, when it sent one (a phone file's art has no address to fetch).
+    val phoneArt = remember(phone?.artJpeg) {
+        phone?.artJpeg?.let { bytes -> runCatching { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }.getOrNull() }
+    }
+    val artwork = remember(mode, phoneArt, playing?.cover) {
+        if (mode == WatchMode.PHONE && phoneArt != null) BitmapPaintable(phoneArt)
+        else playing?.cover?.let { CoilPaintable(it) }
+    }
     var attempt by remember { mutableStateOf(0) }
-    // null: being read; a failure: the phone is not there or not signed in.
-    val lists by produceState<Result<List<WatchList>>?>(null, attempt) { value = runCatching { PhoneLink(context.applicationContext).library() } }
+    // null: being read; a failure: the phone is not there.
+    val lists by produceState<Result<List<WatchList>>?>(null, attempt) { value = runCatching { PhoneLink(app).library() } }
 
     WatchPager(
         playing = playing,
-        error = error,
-        onPrevious = { WatchLocal.previous() },
-        onToggle = { WatchLocal.toggle() },
-        onNext = { WatchLocal.next() },
+        error = if (mode == WatchMode.PHONE) phoneError else error,
+        onPrevious = { if (mode == WatchMode.PHONE) phoneControl("previous") else WatchLocal.previous() },
+        onToggle = {
+            if (mode == WatchMode.PHONE) phoneControl(if (phone?.playing == true) "pause" else "play")
+            else WatchLocal.toggle()
+        },
+        onNext = { if (mode == WatchMode.PHONE) phoneControl("next") else WatchLocal.next() },
         volume = rememberWatchVolume(),
         lists = lists,
         onPlay = { error = null; WatchPlay.play(context, it.uri) { e -> error = e } },
@@ -75,10 +120,13 @@ internal fun WatchApp() {
         onSyncExtensions = {
             syncNote = context.getString(R.string.wear_loading)
             ui.launch {
-                syncNote = runCatching { WatchExtensions.sync(context.applicationContext) }
+                syncNote = runCatching { WatchExtensions.sync(app) }
                     .fold({ n -> context.getString(R.string.wear_extensions_synced, n) }, { e -> context.getString(R.string.wear_failed, e.message ?: "?") })
             }
         },
+        artwork = artwork,
+        mode = mode,
+        onModeChange = { WatchModes.set(it) },
     )
 }
 
@@ -102,7 +150,9 @@ private fun rememberWatchVolume(): WatchVolumeUi {
 
 /**
  * A list tapped on the watch: from the watch's own extensions when one has its songs (the songs
- * from the phone, or the last ones read). With none, nothing plays and the screen says so.
+ * from the phone, or the last ones read). Songs the phone marked phone-only are never asked of
+ * the extensions — they are files of the phone, and the screen says so when a list is all such.
+ * With nothing playable, nothing plays and the screen says why.
  */
 object WatchPlay {
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
@@ -111,17 +161,21 @@ object WatchPlay {
         val app = context.applicationContext
         scope.launch {
             WatchExtensions.init(app)
+            val tracks = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { PhoneLink(app).tracks(uri) }.getOrNull().orEmpty()
+            }
             val fromExtensions = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 if (!WatchExtensions.hasAudio()) return@withContext null
-                val tracks = runCatching { PhoneLink(app).tracks(uri) }.getOrNull().orEmpty()
-                // The first of the first few songs an extension has.
-                tracks.indices.take(5).firstNotNullOfOrNull { i -> WatchExtensions.audio(tracks[i])?.let { Triple(tracks, i, it) } }
+                // The first of the first few resolvable songs an extension has.
+                tracks.indices.filter { !tracks[it].phoneOnly }.take(5)
+                    .firstNotNullOfOrNull { i -> WatchExtensions.audio(tracks[i])?.let { Triple(tracks, i, it) } }
             }
             if (fromExtensions != null) {
                 WatchLocal.play(app, fromExtensions.first, fromExtensions.second, fromExtensions.third, uri = uri)
             } else {
                 WatchLocal.stop()
-                failed(app.getString(R.string.wear_no_source))
+                failed(app.getString(
+                    if (tracks.isNotEmpty() && tracks.all { it.phoneOnly }) R.string.wear_phone_only else R.string.wear_no_source))
             }
         }
     }

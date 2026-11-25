@@ -103,16 +103,52 @@ internal fun WatchPager(
     onSyncExtensions: () -> Unit,
     initialPage: Int = 0,
     artwork: Paintable? = playing?.cover?.let { remember(it) { CoilPaintable(it) } },
+    mode: WatchMode = WatchMode.WATCH,
+    onModeChange: (WatchMode) -> Unit = {},
 ) {
-    val pager = rememberPagerState(initialPage = initialPage) { 2 }
+    // The player first, then — in Watch mode — the library, and the mode switch last in both
+    // modes, so the switch is the same swipe away whichever side is showing.
+    val pager = rememberPagerState(initialPage = initialPage) { if (mode == WatchMode.WATCH) 3 else 2 }
     AppScaffold {
         HorizontalPagerScaffold(pagerState = pager) {
             HorizontalPager(state = pager) { page ->
-                if (page == 0) {
-                    WatchPlayer(playing, error, artwork, onPrevious, onToggle, onNext, volume, active = pager.currentPage == 0)
-                } else {
-                    WatchLibrary(lists, onPlay, onRetry, extensionsNote, onSyncExtensions)
+                when {
+                    page == 0 -> WatchPlayer(playing, error, artwork, onPrevious, onToggle, onNext, volume, active = pager.currentPage == 0)
+                    mode == WatchMode.WATCH && page == 1 -> WatchLibrary(lists, onPlay, onRetry, extensionsNote, onSyncExtensions)
+                    else -> WatchModePage(mode, onModeChange)
                 }
+            }
+        }
+    }
+}
+
+/** Where the music plays: the phone (this watch mirrors and drives it) or the watch itself. */
+@Composable
+internal fun WatchModePage(mode: WatchMode, onModeChange: (WatchMode) -> Unit) {
+    val state = rememberTransformingLazyColumnState()
+    val spec = rememberTransformationSpec()
+    ScreenScaffold(scrollState = state) { padding ->
+        TransformingLazyColumn(state = state, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
+            item {
+                ListHeader(Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec)) {
+                    Text(stringResource(R.string.wear_mode))
+                }
+            }
+            item {
+                Button(
+                    onClick = { onModeChange(WatchMode.PHONE) },
+                    colors = if (mode == WatchMode.PHONE) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors(),
+                    secondaryLabel = { Text(stringResource(R.string.wear_mode_phone_about), maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                    modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
+                ) { Text(stringResource(R.string.wear_mode_phone), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+            item {
+                Button(
+                    onClick = { onModeChange(WatchMode.WATCH) },
+                    colors = if (mode == WatchMode.WATCH) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors(),
+                    secondaryLabel = { Text(stringResource(R.string.wear_mode_watch_about), maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                    modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
+                ) { Text(stringResource(R.string.wear_mode_watch), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
         }
     }

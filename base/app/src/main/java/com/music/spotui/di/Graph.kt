@@ -49,6 +49,8 @@ object Graph {
         com.music.spotui.data.preferences.LocalFilesPref.init(application)
         // A watch linked before reaches this phone over the Wi-Fi too, while the app runs.
         com.music.spotui.wear.WatchLan.startIfLinked(application)
+        // The watch's Phone mode mirrors what plays here: push its changes to the watch.
+        com.music.spotui.wear.PhoneNowPlaying.start(application)
         com.music.spotui.radio.RadioFavoritesStore.init(application)
     }
 
