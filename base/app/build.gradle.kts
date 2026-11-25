@@ -184,11 +184,11 @@ dependencies {
     implementation(project(":api-ytmusic"))
     // The watch's app asks this one for the account's session and playlists (WearLinkService).
     implementation("com.google.android.gms:play-services-wearable:20.0.1")
-    // The watch's app, embedded in this one: a paired watch offers Scadify under "Apps on your
-    // phone". Same application id and signature as this app (the :wear build mirrors the -Pclean
-    // suffix), which is what lets the two link over the Data Layer at all. (The wearApp
-    // configuration has no type-safe accessor in this AGP's Kotlin DSL: named by string.)
-    "wearApp"(project(":wear"))
+    // No wearApp embedding of the watch's app (project(":wear")): this project's AGP no longer
+    // provides the wearApp configuration at all (checked both the accessor and the named
+    // configuration against CI), so the watch app ships as its own APK — same application id
+    // (the :wear build mirrors the -Pclean suffix) and same signature as this app, which is
+    // what lets the two link over the Data Layer at all.
     // AutoMix: song analysis and transition planning (pure Kotlin), Beat This on ONNX Runtime.
     implementation(project(":automix"))
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.2")
