@@ -2,7 +2,6 @@ package com.music.spotui.ui.immersive.lyrics
 
 import android.os.Build
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -183,9 +182,12 @@ fun LyricGlowView(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
             )
             // The transport's space is kept while it is faded, so the lines never shift.
+            val chromeAlpha by animateFloatAsState(if (chrome) 1f else 0f, tween(if (chrome) 250 else 450), label = "glowChrome")
             Box(Modifier.fillMaxWidth().height(92.dp)) {
-                AnimatedVisibility(visible = chrome, enter = fadeIn(tween(250)), exit = fadeOut(tween(450))) {
-                    GlowTransport(clock, durationMs) { touched++ }
+                if (chromeAlpha > 0.01f) {
+                    Box(Modifier.fillMaxSize().graphicsLayer { alpha = chromeAlpha }) {
+                        GlowTransport(clock, durationMs) { touched++ }
+                    }
                 }
             }
             Canvas(Modifier.fillMaxWidth().height(56.dp)) {
