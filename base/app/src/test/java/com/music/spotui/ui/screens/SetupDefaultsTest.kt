@@ -59,8 +59,8 @@ class SetupDefaultsTest {
     /** The store as if every catalogue had been read: the step's refresh then changes nothing. */
     private fun seedStore(catalogs: Map<String, Catalog>) {
         val repos = catalogs.mapValues { (url, catalog) -> ExtensionStore.Repo(url, catalog = catalog) }.toMutableMap()
-        repos.getOrPut(ExtensionStore.OFFICIAL_REPO) { ExtensionStore.Repo(ExtensionStore.OFFICIAL_REPO, catalog = Catalog("Official", emptyList())) }
-        repos.getOrPut(Discovery.SOURCE) { ExtensionStore.Repo(Discovery.SOURCE, catalog = Catalog("Community", emptyList())) }
+        repos.getOrPut(ExtensionStore.OFFICIAL_REPO) { ExtensionStore.Repo(ExtensionStore.OFFICIAL_REPO, catalog = Catalog(name = "Official")) }
+        repos.getOrPut(Discovery.SOURCE) { ExtensionStore.Repo(Discovery.SOURCE, catalog = Catalog(name = "Community")) }
         flowOf<Map<String, ExtensionStore.Repo>>(ExtensionStore, "_repos").value = repos
         ExtensionStore.busy.value = emptySet()
         pending.value = null
@@ -85,7 +85,7 @@ class SetupDefaultsTest {
 
     @Test fun `tapping install runs the sequence and a refused download is said on the step`() {
         seedRegistry(Registry(repositories = listOf(deadRepo)))
-        seedStore(mapOf(deadRepo to Catalog("Test", listOf(entry("io.fresh", "Fresh Home", "1.1.0", 2)))))
+        seedStore(mapOf(deadRepo to Catalog(name = "Test", extensions = listOf(entry("io.fresh", "Fresh Home", "1.1.0", 2)))))
 
         rule.setContent { DefaultsStep(onNext = {}) }
 
@@ -113,7 +113,7 @@ class SetupDefaultsTest {
         // Only Fresh Home is in a catalogue the phone can see, at a newer version. Melzo is
         // in none — installed and running, so it reads as installed all the same; Solid
         // Source is nowhere, and reads as unavailable.
-        seedStore(mapOf(deadRepo to Catalog("Test", listOf(entry("io.fresh", "Fresh Home", "1.1.0", 2)))))
+        seedStore(mapOf(deadRepo to Catalog(name = "Test", extensions = listOf(entry("io.fresh", "Fresh Home", "1.1.0", 2)))))
 
         rule.setContent { DefaultsStep(onNext = {}) }
 
