@@ -16,7 +16,13 @@ class WatchPlaybackService : android.app.Service() {
         val notification = android.app.Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(local?.name ?: getString(R.string.app_name)).setContentText(local?.artists.orEmpty())
-            .setContentIntent(open).setOngoing(true).build()
+            .setContentIntent(open).setOngoing(true)
+            // The media style ties the notification to the player's session: the system's media
+            // surface (and a paired car kit) reads the pair as one playback.
+            .setStyle(android.app.Notification.MediaStyle().also { style ->
+                WatchLocal.sessionToken()?.let { style.setMediaSession(it) }
+            })
+            .build()
         startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         return START_NOT_STICKY
     }

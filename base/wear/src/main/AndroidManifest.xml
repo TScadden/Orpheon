@@ -17,5 +17,12 @@
             </intent-filter>
         </activity>
         <service android:name=".WatchPlaybackService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
+        <!-- Phone mode: the phone pushes what plays there whenever it changes. -->
+        <service android:name=".PhoneNowPlayingService" android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/scadify" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

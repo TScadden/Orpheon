@@ -111,7 +111,7 @@ object WatchExtensions : Host {
     suspend fun audio(t: WatchTrack, ahead: Boolean = false): Pair<AudioStream, String>? = withContext(Dispatchers.IO) {
         val info = TrackInfo(
             id = t.uri.substringAfterLast(':'), uri = t.uri, title = t.name, artist = t.artists.firstOrNull().orEmpty(),
-            artists = t.artists, album = t.album, durationMs = t.durationMs, cover = t.cover,
+            artists = t.artists, album = t.album, durationMs = t.durationMs, isrc = t.isrc.ifBlank { null }, cover = t.cover,
         )
         val input = AudioQuery.toJson(info, ahead)
         for (x in _installed.value) {

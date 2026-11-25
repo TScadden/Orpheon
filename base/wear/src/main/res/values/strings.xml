@@ -1,7 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Scadify</string>
-    <string name="wear_no_phone">Open Scadify on your phone, signed in, with the watch connected.</string>
+    <string name="wear_no_phone">Open Scadify on your phone, with the watch connected.</string>
+    <string name="wear_on_phone">On your phone</string>
+    <string name="wear_mode">Playback</string>
+    <string name="wear_mode_phone">Phone</string>
+    <string name="wear_mode_watch">Watch</string>
+    <string name="wear_mode_phone_about">Control what plays on your phone</string>
+    <string name="wear_mode_watch_about">Play on the watch itself, no phone needed</string>
+    <string name="wear_phone_only">These songs live on your phone — play them in Phone mode.</string>
     <string name="wear_loading">Loading…</string>
     <string name="wear_nothing_playing">Nothing playing</string>
     <string name="wear_library">Your music</string>

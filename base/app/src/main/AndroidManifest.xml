@@ -200,6 +200,11 @@
                 <action android:name="com.google.android.gms.wearable.REQUEST_RECEIVED" />
                 <data android:scheme="wear" android:host="*" android:pathPrefix="/orpheon" />
             </intent-filter>
+            <!-- Phone mode: what plays here, and the watch's commands for this phone's player. -->
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.REQUEST_RECEIVED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/scadify" />
+            </intent-filter>
             <!-- The extensions, too large for a message, go to the watch through a channel. -->
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />

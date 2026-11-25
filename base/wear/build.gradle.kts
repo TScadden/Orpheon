@@ -10,14 +10,18 @@ android {
     namespace = "app.myspoti.wear"
     compileSdk = 37
 
-    val version = (findProperty("appVersionName") as String?) ?: "1.0.0"
+    // Scadify's own numbering, as the phone's app: the default is the current shipped build's
+    // number ("15" = v15, versionCode 200 + the number), bumped with every shipped version.
+    val version = (findProperty("appVersionName") as String?) ?: "15"
     val beta = findProperty("appVersionName") == null || version.contains("-beta")
+    // As the phone's app (base/app): -Pclean is the shipped channel, its own app (id suffix .clean).
+    val cleanApp = findProperty("clean") != null
     defaultConfig {
         // As the phone's app (base/app): betas "app.orpheon.beta", releases "app.orpheon", debug builds ".dev".
         applicationId = if (beta) "app.orpheon.beta" else "app.orpheon"
         minSdk = 30
         targetSdk = 36
-        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 200
+        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 215
         versionName = version
     }
     signingConfigs {
@@ -32,7 +36,10 @@ android {
     }
     buildTypes {
         debug {
-            applicationIdSuffix = ".dev"
+            // The phone's shipped channel (-Pclean, app.orpheon.beta.clean): the Data Layer links
+            // only the same application id under the same signature, so the watch's build takes
+            // the phone's suffix, whichever channel is being built.
+            applicationIdSuffix = if (cleanApp) ".clean" else ".dev"
             signingConfig = signingConfigs.getByName("stableDebug")
         }
         release {

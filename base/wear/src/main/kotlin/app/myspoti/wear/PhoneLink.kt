@@ -118,8 +118,21 @@ class PhoneLink(private val context: Context) {
         return Json.parseToJsonElement(text).jsonArray.map { e ->
             val o = e.jsonObject
             WatchTrack(o.text("uri"), o.text("name"), o["artists"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty(), o.text("album"),
-                o["durationMs"]?.jsonPrimitive?.long ?: 0L, o.text("cover").ifBlank { null })
+                o["durationMs"]?.jsonPrimitive?.long ?: 0L, o.text("cover").ifBlank { null },
+                o.text("isrc"), o["phoneOnly"]?.jsonPrimitive?.content == "true")
         }
+    }
+
+    /** What plays on the phone, asked fresh; the answer is kept as Phone mode's state. */
+    suspend fun nowPlaying(): PhonePlaying {
+        val text = ask(NOW_PLAYING)
+        return PhonePlayingJson.parse(text).also { store.put("nowplaying", text); PhonePlayingState.update(it) }
+    }
+
+    /** A command for the phone's player ("play", "pause", "next", "previous", "seek:<ms>"); the phone answers with what plays then. */
+    suspend fun control(command: String): PhonePlaying {
+        val text = ask(CONTROL, command)
+        return PhonePlayingJson.parse(text).also { store.put("nowplaying", text); PhonePlayingState.update(it) }
     }
 
     /** The phone's extensions (packages and state, as the pass carries them): through a Data Layer channel, else the Wi-Fi. */
@@ -138,6 +151,8 @@ class PhoneLink(private val context: Context) {
         const val LIBRARY = "/orpheon/library"
         const val TRACKS = "/orpheon/tracks"
         const val EXTENSIONS = "/orpheon/extensions"
+        const val NOW_PLAYING = "/scadify/nowplaying"
+        const val CONTROL = "/scadify/control"
         private const val TAG = "Orpheon"
         private const val LINK = "link"
         private const val ASK_MS = 20_000L
@@ -147,5 +162,12 @@ class PhoneLink(private val context: Context) {
     }
 }
 
-/** A song of a list, as the phone gives it for the watch's extensions. */
-class WatchTrack(val uri: String, val name: String, val artists: List<String>, val album: String, val durationMs: Long, val cover: String?)
+/**
+ * A song of a list, as the phone gives it for the watch's extensions. [isrc]: the recording's
+ * fingerprint where the phone's store has it. [phoneOnly]: a file of the phone with no
+ * catalogue identity — the watch cannot play it and must not try (Phone mode plays it there).
+ */
+class WatchTrack(
+    val uri: String, val name: String, val artists: List<String>, val album: String,
+    val durationMs: Long, val cover: String?, val isrc: String = "", val phoneOnly: Boolean = false,
+)
