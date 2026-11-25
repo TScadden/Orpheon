@@ -30,6 +30,8 @@ import com.music.spotui.data.entity.PodcastModel
 import com.music.spotui.data.entity.SearchResults
 import com.music.spotui.data.entity.ShowPage
 import com.music.spotui.data.entity.SongsModel
+import com.music.spotui.data.local.ImportedPlaylists
+import com.music.spotui.data.local.ImportedSong
 import com.music.spotui.data.local.ListenHistory
 import com.music.spotui.data.local.LocalFileMatch
 import com.music.spotui.data.local.LocalMusic
@@ -948,6 +950,39 @@ class Api constructor(
         ScreenCache.markLikedFull()
         SongPlayer.registerLikedSongs(tracks.map { it.url })
         emit(Response.Success(page(tracks, true)))
+    }
+
+    /** An imported song as a row: built exactly like [songOf] builds a Spotify track, with the row's own key kept. */
+    private fun importedSongOf(s: ImportedSong): SongsModel = SongsModel(
+        id = stableId("track:${s.spotifyTrackId}"),
+        title = s.title.take(128),
+        album = s.album,
+        singer = s.artist,
+        coverUri = s.coverUrl,
+        url = SongPlayer.buildSpotifyPlayQuery(s.spotifyTrackId, s.title, s.artist),
+        spotifyTrackId = s.spotifyTrackId,
+        durationMs = s.durationMs.toInt(),
+        rowUid = s.key,
+    )
+
+    /**
+     * An imported playlist as a page: read from this phone alone (its store), whole at once.
+     * Its type is "imported": the context screens let its rows be removed and the list be
+     * renamed, which the account's editable check would never allow with no account.
+     */
+    fun getImportedPlaylistPage(id: String): Flow<Response<ContextPageModel>> = flow {
+        val p = ImportedPlaylists.get(id)
+        if (p == null) { emit(Response.Error(context.getString(R.string.imported_playlist_gone))); return@flow }
+        emit(Response.Success(ContextPageModel(
+            uri = "scadify:imported:$id",
+            type = "imported",
+            name = p.name,
+            coverUri = p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl.orEmpty(),
+            ownerName = context.getString(R.string.imported_playlist_subtitle),
+            metaLine = context.resources.getQuantityString(R.plurals.lbl_n_songs, p.items.size, p.items.size),
+            tracks = p.items.map(::importedSongOf),
+            complete = true,
+        )))
     }
 
     /**

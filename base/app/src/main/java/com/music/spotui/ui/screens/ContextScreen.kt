@@ -156,6 +156,7 @@ class ContextViewModel(
                     val flow = when (type) {
                         "album" -> api.getAlbumPage(id)
                         "liked" -> api.getLikedPage()
+                        "imported" -> api.getImportedPlaylistPage(id)
                         else -> api.getPlaylistPage(id)
                     }
                     // The first page of tracks; a playlist of 200 songs or fewer is waited for whole (as
@@ -286,6 +287,7 @@ class ContextViewModel(
                 "liked" -> api.getLikedPage(full = force)
                 // id: "<artist id>|<artist name>"
                 "liked-artist" -> api.getLikedByArtistPage(id.substringBefore('|'), id.substringAfter('|', ""))
+                "imported" -> api.getImportedPlaylistPage(id)
                 else -> api.getPlaylistPage(id, force = force)
             }
             // Liked Songs: a like or unlike anywhere puts the list right at once.
@@ -375,6 +377,8 @@ class ContextViewModel(
         if (p.type == "playlist") editableContext.value = withContext(Dispatchers.IO) {
             runCatching { EditablePlaylists.load().any { it.id == p.uri.substringAfterLast(':') } }.getOrDefault(false)
         }
+        // An imported list is this phone's own: its rows can always be taken out.
+        if (p.type == "imported") editableContext.value = true
         if (p.type == "playlist" && !p.isBlend) members.value = withContext(Dispatchers.IO) {
             runCatching { MyspotiRuntime.api.playlists.members(p.uri) }.getOrDefault(emptyList())
         }
@@ -641,6 +645,8 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
     var askRemoveDownloads by remember { mutableStateOf(false) }
     var playlistMenu by remember { mutableStateOf(false) }
     var albumMenu by remember { mutableStateOf(false) }
+    var importedMenu by remember { mutableStateOf(false) }
+    var importedRenaming by remember { mutableStateOf(false) }
     var addingSongs by remember { mutableStateOf(false) }
     var leaveAsk by remember { mutableStateOf(false) }
     // The profile id comes once per session (and is no Compose state): `name` is set just before it,
@@ -657,6 +663,12 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
     // A11: the row goes at once, then the removal is written to Spotify. The snackbar keeps
     // the mistake reversible: Undo adds the track back and the page is read again.
     fun removeFromThisPlaylist(song: SongsModel) {
+        // An imported list: the row leaves this phone's store, nothing is written anywhere else.
+        if (p.type == "imported") {
+            vm.dropTrack(song)
+            com.music.spotui.data.local.ImportedPlaylists.remove(p.uri.substringAfterLast(':'), song.rowUid)
+            return
+        }
         val playlistId = p.uri.substringAfterLast(':')
         vm.dropTrack(song)
         com.music.spotui.data.api.SpotifySync.removeRowFromPlaylist(context, playlistId, song.spotifyTrackId, song.rowUid) { ok ->
@@ -700,6 +712,22 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
     )
     if (addingSongs) com.music.spotui.ui.components.AddSongsScreen(p) { added -> addingSongs = false; if (added) vm.reload() }
     if (albumMenu) com.music.spotui.ui.components.AlbumOptionsSheet(p.uri, p.name, known = p) { albumMenu = false }
+    if (importedMenu) ImportedPlaylistMenuSheet(
+        name = p.name,
+        onRename = { importedMenu = false; importedRenaming = true },
+        onDelete = {
+            importedMenu = false
+            com.music.spotui.data.local.ImportedPlaylists.delete(p.uri.substringAfterLast(':'))
+            navController.navigateUp()
+        },
+        onDismiss = { importedMenu = false },
+    )
+    if (importedRenaming) NameDialog(stringResource(R.string.local_rename), p.name, stringResource(R.string.local_rename),
+        onDismiss = { importedRenaming = false }) { newName ->
+        importedRenaming = false
+        com.music.spotui.data.local.ImportedPlaylists.rename(p.uri.substringAfterLast(':'), newName)
+        vm.reload()
+    }
     if (playlistMenu) com.music.spotui.ui.components.PlaylistOptionsSheet(
         page = p,
         onAddSongs = if (p.type == "playlist" && vm.editableContext.value && !p.isBlend) ({ addingSongs = true }) else null,
@@ -731,7 +759,7 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
         com.music.spotui.ui.components.SavedInSheet(song = sel, context = context, onDismiss = { savedInSong = null })
     }
     menuSong?.let { sel ->
-        val inPlaylist = p.type == "playlist"
+        val inPlaylist = p.type == "playlist" || p.type == "imported"
         val canRemove = inPlaylist && vm.editableContext.value
         com.music.spotui.ui.components.SongOptionsSheet(
             song = sel,
@@ -748,7 +776,7 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
     // Liked Songs: a track unliked anywhere leaves the list right away. Derived state:
     // recomputed when the page, the search, the sort or a like changes, while a recomposition
     // of the screen with nothing new in them re-sorts nothing (a 900-track list is real work).
-    val findable = p.type == "liked" || p.type == "playlist"
+    val findable = p.type == "liked" || p.type == "playlist" || p.type == "imported"
     val all by remember(p) {
         derivedStateOf {
             if (p.type == "liked" || p.type == "liked-artist") p.tracks.filter { SongPlayer.library["spotify:track:${it.spotifyTrackId}"] != false } else p.tracks
@@ -958,7 +986,7 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
                         // Saving is for other people's playlists: the user's own are in the library already.
                         // An album of another provider is read only: Spotify can neither save nor download it.
                         val onSpotify = !com.music.spotui.data.catalog.CatalogRuntime.isCatalogUri(p.uri)
-                        if (onSpotify && p.type != "liked" && !(p.type == "playlist" && ownPlaylist)) {
+                        if (onSpotify && p.type != "liked" && p.type != "imported" && !(p.type == "playlist" && ownPlaylist)) {
                             LikeButton(liked = SongPlayer.library[p.uri] ?: contextSaved, size = 28.dp, touch = com.music.spotui.ui.components.MinTouch) { vm.toggleContextSaved(p) }
                         }
                         // Once per list, not at every redraw of the header (6000 songs, mapped each time).
@@ -975,7 +1003,7 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
                         // A list downloaded as a whole stays in step with Spotify (new songs in, gone songs out).
                         val listKept = com.music.spotui.data.offline.OfflineCollections.isDownloaded(p.uri)
                         LaunchedEffect(listKept, p.complete, p.tracks.size) { if (listKept && p.complete) com.music.spotui.data.offline.OfflineCollections.sync(p) }
-                        if (onSpotify) com.music.spotui.ui.components.DownloadListButton(downloadedCount, ids.size, busy, kept = listKept, touch = com.music.spotui.ui.components.MinTouch) {
+                        if (onSpotify && p.type != "imported") com.music.spotui.ui.components.DownloadListButton(downloadedCount, ids.size, busy, kept = listKept, touch = com.music.spotui.ui.components.MinTouch) {
                             if (listKept) askRemoveDownloads = true
                             else {
                                 com.music.spotui.ui.components.DownloadAsk.start(context) { q ->
@@ -985,9 +1013,15 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
                                 }
                             }
                         }
-                        if (onSpotify && (p.type == "playlist" || p.type == "album" || p.type == "liked" || p.type == "liked-artist")) {
+                        if (onSpotify && (p.type == "playlist" || p.type == "album" || p.type == "liked" || p.type == "liked-artist" || p.type == "imported")) {
                             Icon(Icons.Default.MoreVert, stringResource(R.string.lbl_more), tint = AppText.copy(alpha = 0.8f),
-                                modifier = Modifier.size(com.music.spotui.ui.components.MinTouch).pressable(0.9f) { if (p.type == "playlist") playlistMenu = true else albumMenu = true }
+                                modifier = Modifier.size(com.music.spotui.ui.components.MinTouch).pressable(0.9f) {
+                                    when (p.type) {
+                                        "playlist" -> playlistMenu = true
+                                        "imported" -> importedMenu = true
+                                        else -> albumMenu = true
+                                    }
+                                }
                                     .wrapContentSize().size(26.dp))
                         }
                         // Sorting stays in reach in the header (the search field above the songs is folded).
@@ -1731,6 +1765,32 @@ private fun SimilarAlbums(navController: NavController, firstTrackId: String, al
                     Text(a.name, color = AppText, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
                     Text(artists, color = AppMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+            }
+        }
+    }
+}
+
+/** An imported playlist's page menu: rename it, or delete it from this phone. Nothing leaves the phone. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+internal fun ImportedPlaylistMenuSheet(name: String, onRename: () -> Unit, onDelete: () -> Unit, onDismiss: () -> Unit) {
+    com.music.spotui.ui.components.LookSheet(onDismissRequest = onDismiss, containerColor = tone(0xFF282828)) {
+        Column(Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
+            Text(name, color = AppText, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(20.dp, 0.dp, 20.dp, 8.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onRename).padding(horizontal = 20.dp, vertical = 12.dp),
+            ) {
+                Icon(androidx.compose.material.icons.Icons.Outlined.Edit, null, tint = AppMuted, modifier = Modifier.size(24.dp))
+                Text(stringResource(R.string.local_rename), color = AppText, fontSize = 16.sp, modifier = Modifier.padding(start = 16.dp))
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onDelete).padding(horizontal = 20.dp, vertical = 12.dp),
+            ) {
+                Icon(androidx.compose.material.icons.Icons.Outlined.Delete, null, tint = AppMuted, modifier = Modifier.size(24.dp))
+                Text(stringResource(R.string.local_delete_playlist), color = AppText, fontSize = 16.sp, modifier = Modifier.padding(start = 16.dp))
             }
         }
     }

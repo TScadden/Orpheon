@@ -120,6 +120,7 @@ import com.music.spotui.ui.navigation.localPlaylistRoute
 import com.music.spotui.ui.navigation.showRoute
 import com.music.spotui.ui.navigation.playlistRoute
 import com.music.spotui.ui.screens.ContextViewModel
+import com.music.spotui.ui.screens.IMPORTED_PLAYLIST_PREFIX
 import com.music.spotui.ui.screens.LOCAL_PLAYLIST_PREFIX
 import com.music.spotui.ui.screens.LibraryCreateSheet
 import com.music.spotui.ui.screens.LibraryEntryCover
@@ -160,7 +161,7 @@ fun ImmersiveLibraryScreen(navController: NavController) {
     LaunchedEffect((entries as? Response.Success)?.data?.take(8)?.map { it.spotifyId }) {
         val top = (entries as? Response.Success)?.data.orEmpty().take(8).mapNotNull { e ->
             when {
-                e.isFolder || e.spotifyId.startsWith(LOCAL_PLAYLIST_PREFIX) -> null
+                e.isFolder || e.spotifyId.startsWith(LOCAL_PLAYLIST_PREFIX) || e.spotifyId.startsWith(IMPORTED_PLAYLIST_PREFIX) -> null
                 e.spotifyId in setOf(Api.HomeCache.LOCAL_FILES_ID, Api.HomeCache.DOWNLOADS_ID, Api.HomeCache.EPISODES_ID) -> null
                 e.spotifyId == Api.HomeCache.LIKED_SONGS_ID -> "liked" to ""
                 e.isPlaylist -> "playlist" to e.spotifyId
@@ -352,6 +353,7 @@ private fun libraryEntries(entries: Response<List<LibraryEntry>>): Pair<List<Lib
     val localName = stringResource(R.string.lbl_local_files)
     val downloadsName = stringResource(R.string.lbl_downloads)
     val localSubtitle = stringResource(R.string.lbl_playlist) + " • " + stringResource(R.string.local_playlist_subtitle)
+    val importedSubtitle = stringResource(R.string.lbl_playlist) + " • " + stringResource(R.string.imported_playlist_subtitle)
     val likedName = stringResource(R.string.lbl_liked_songs)
     val radioName = stringResource(R.string.live_radio_title)
     val packageName = LocalContext.current.packageName
@@ -385,8 +387,15 @@ private fun libraryEntries(entries: Response<List<LibraryEntry>>): Pair<List<Lib
                 subtitle = localSubtitle, coverUri = "", isPlaylist = true,
             )
         }
+        // The playlists imported from a public link, with their first song's cover.
+        val importedLists = com.music.spotui.data.local.ImportedPlaylists.list().map { p ->
+            LibraryEntry(
+                spotifyId = IMPORTED_PLAYLIST_PREFIX + p.id, name = p.name,
+                subtitle = importedSubtitle, coverUri = p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl.orEmpty(), isPlaylist = true,
+            )
+        }
         list.take(at) + (if (localShown) listOf(local) else emptyList()) + (if (radioOn) listOf(radio) else emptyList()) +
-            (if (hasDownloads) listOf(downloads) else emptyList()) + localLists + list.drop(at)
+            (if (hasDownloads) listOf(downloads) else emptyList()) + localLists + importedLists + list.drop(at)
     }.let { list ->
         LibraryOrder.version
         LibraryOrder.arrange(list, LibraryOrder.sort, LibraryOrder.custom(LibraryOrder.ROOT), rootPinned)
@@ -472,7 +481,7 @@ internal fun Modifier.immersiveBleed(inset: Dp): Modifier = layout { measurable,
 
 /** Albums, playlists and folders start loading under the finger. */
 private fun prefetchLibraryEntry(entry: LibraryEntry) = when {
-    entry.isFolder || entry.spotifyId.startsWith(LOCAL_PLAYLIST_PREFIX) || entry.spotifyId.startsWith(Api.HomeCache.SHOW_PREFIX) -> Unit
+    entry.isFolder || entry.spotifyId.startsWith(LOCAL_PLAYLIST_PREFIX) || entry.spotifyId.startsWith(IMPORTED_PLAYLIST_PREFIX) || entry.spotifyId.startsWith(Api.HomeCache.SHOW_PREFIX) -> Unit
     entry.spotifyId == Api.HomeCache.LOCAL_FILES_ID || entry.spotifyId == Api.HomeCache.DOWNLOADS_ID || entry.spotifyId == Api.HomeCache.EPISODES_ID || entry.spotifyId == Api.HomeCache.NEW_EPISODES_ID -> Unit
     entry.spotifyId == com.music.spotui.radio.RadioFeaturePref.LIBRARY_ENTRY_ID -> Unit
     entry.spotifyId == Api.HomeCache.LIKED_SONGS_ID -> ContextViewModel.prefetch("liked", "")
@@ -483,6 +492,7 @@ private fun prefetchLibraryEntry(entry: LibraryEntry) = when {
 private fun openLibraryEntry(entry: LibraryEntry, navController: NavController) {
     if (entry.isFolder) navController.navigate(folderRoute(entry.folderUri, entry.name))
     else if (entry.spotifyId.startsWith(LOCAL_PLAYLIST_PREFIX)) navController.navigate(localPlaylistRoute(entry.spotifyId.removePrefix(LOCAL_PLAYLIST_PREFIX)))
+    else if (entry.spotifyId.startsWith(IMPORTED_PLAYLIST_PREFIX)) navController.navigate(com.music.spotui.ui.navigation.importedPlaylistRoute(entry.spotifyId.removePrefix(IMPORTED_PLAYLIST_PREFIX)))
     else if (entry.spotifyId.startsWith(Api.HomeCache.SHOW_PREFIX)) navController.navigate(showRoute(entry.spotifyId.removePrefix(Api.HomeCache.SHOW_PREFIX), entry.name))
     else if (entry.spotifyId == Api.HomeCache.DOWNLOADS_ID) navController.navigate(Routes.Downloads.route)
     else if (entry.spotifyId == Api.HomeCache.LOCAL_FILES_ID) navController.navigate(Routes.LocalFiles.route)

@@ -267,6 +267,8 @@ private fun ImmersiveContextContent(navController: NavController, vm: ContextVie
     var sortMenu by remember { mutableStateOf(false) }
     var askRemoveDownloads by remember { mutableStateOf(false) }
     var playlistMenu by remember { mutableStateOf(false) }
+    var importedMenu by remember { mutableStateOf(false) }
+    var importedRenaming by remember { mutableStateOf(false) }
     var addingSongs by remember { mutableStateOf(false) }
     // A phone file added on this device, being renamed (its row's long press).
     var editingLocal by remember { mutableStateOf<com.music.spotui.data.local.LocalItem?>(null) }
@@ -315,6 +317,12 @@ private fun ImmersiveContextContent(navController: NavController, vm: ContextVie
     // The row goes at once, then the removal is written. The snackbar keeps the mistake
     // reversible: Undo adds the track back and the page is read again.
     fun removeFromThisPlaylist(song: SongsModel) {
+        // An imported list: the row leaves this phone's store, nothing is written anywhere else.
+        if (p.type == "imported") {
+            vm.dropTrack(song)
+            com.music.spotui.data.local.ImportedPlaylists.remove(p.uri.substringAfterLast(':'), song.rowUid)
+            return
+        }
         val playlistId = p.uri.substringAfterLast(':')
         vm.dropTrack(song)
         com.music.spotui.data.api.SpotifySync.removeTrackFromPlaylist(context, playlistId, song.spotifyTrackId) { ok ->
@@ -341,6 +349,22 @@ private fun ImmersiveContextContent(navController: NavController, vm: ContextVie
 
     if (addingSongs) com.music.spotui.ui.components.AddSongsScreen(p) { added -> addingSongs = false; if (added) vm.reload() }
     if (albumMenu) com.music.spotui.ui.components.AlbumOptionsSheet(p.uri, p.name, known = p) { albumMenu = false }
+    if (importedMenu) com.music.spotui.ui.screens.ImportedPlaylistMenuSheet(
+        name = p.name,
+        onRename = { importedMenu = false; importedRenaming = true },
+        onDelete = {
+            importedMenu = false
+            com.music.spotui.data.local.ImportedPlaylists.delete(p.uri.substringAfterLast(':'))
+            navController.navigateUp()
+        },
+        onDismiss = { importedMenu = false },
+    )
+    if (importedRenaming) com.music.spotui.ui.screens.NameDialog(stringResource(R.string.local_rename), p.name, stringResource(R.string.local_rename),
+        onDismiss = { importedRenaming = false }) { newName ->
+        importedRenaming = false
+        com.music.spotui.data.local.ImportedPlaylists.rename(p.uri.substringAfterLast(':'), newName)
+        vm.reload()
+    }
     if (playlistMenu) com.music.spotui.ui.components.PlaylistOptionsSheet(
         page = p,
         onAddSongs = if (p.type == "playlist" && vm.editableContext.value && !p.isBlend) ({ addingSongs = true }) else null,
@@ -368,7 +392,7 @@ private fun ImmersiveContextContent(navController: NavController, vm: ContextVie
         },
     )
     menuSong?.let { sel ->
-        val inPlaylist = p.type == "playlist"
+        val inPlaylist = p.type == "playlist" || p.type == "imported"
         val canRemove = inPlaylist && vm.editableContext.value
         com.music.spotui.ui.immersive.sheets.ImmersiveSongOptionsSheet(
             song = sel,
@@ -385,7 +409,7 @@ private fun ImmersiveContextContent(navController: NavController, vm: ContextVie
     // Liked Songs: a track unliked anywhere leaves the list right away. Derived state:
     // recomputed when the page, the search, the sort or a like changes, while a recomposition
     // with nothing new in them re-sorts nothing (a 900-track list is real work).
-    val findable = p.type == "liked" || p.type == "playlist"
+    val findable = p.type == "liked" || p.type == "playlist" || p.type == "imported"
     val all by remember(p) {
         derivedStateOf {
             if (isLiked) p.tracks.filter { SongPlayer.library["spotify:track:${it.spotifyTrackId}"] != false } else p.tracks
@@ -653,10 +677,16 @@ private fun ImmersiveContextContent(navController: NavController, vm: ContextVie
                         )
                     }
                     if (!com.music.spotui.data.catalog.CatalogRuntime.isCatalogUri(p.uri) &&
-                        (p.type == "playlist" || p.type == "album" || p.type == "liked" || p.type == "liked-artist")) ImmersiveBarAction(
+                        (p.type == "playlist" || p.type == "album" || p.type == "liked" || p.type == "liked-artist" || p.type == "imported")) ImmersiveBarAction(
                         icon = Icons.Rounded.MoreHoriz,
                         contentDescription = stringResource(R.string.lbl_more),
-                        onClick = { if (p.type == "playlist") playlistMenu = true else albumMenu = true },
+                        onClick = {
+                            when (p.type) {
+                                "playlist" -> playlistMenu = true
+                                "imported" -> importedMenu = true
+                                else -> albumMenu = true
+                            }
+                        },
                     )
                 }
             } else null,
@@ -838,7 +868,7 @@ private fun ContextHeader(
             // An album of another provider is read only: Spotify can neither save nor download it.
             val onSpotify = !com.music.spotui.data.catalog.CatalogRuntime.isCatalogUri(p.uri)
             if (onSpotify) Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (p.type != "liked") ImmersiveCircleButton(
+                if (p.type != "liked" && p.type != "imported") ImmersiveCircleButton(
                     icon = if (saved) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                     contentDescription = stringResource(if (saved) R.string.immersive_detail_unsave else R.string.immersive_detail_save),
                     onClick = onToggleSaved,
@@ -856,7 +886,7 @@ private fun ContextHeader(
                 }
                 val listKept = OfflineCollections.isDownloaded(p.uri)
                 LaunchedEffect(listKept, p.complete, p.tracks.size) { if (listKept && p.complete) OfflineCollections.sync(p) }
-                DownloadCircle(downloadedCount, ids.size, busy, listKept) {
+                if (p.type != "imported") DownloadCircle(downloadedCount, ids.size, busy, listKept) {
                     if (listKept) onAskRemoveDownloads()
                     else DownloadAsk.start(context) { q ->
                         com.music.spotui.di.Haptics.confirm()

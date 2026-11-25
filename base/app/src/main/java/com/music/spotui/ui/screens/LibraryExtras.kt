@@ -85,6 +85,10 @@ import com.music.spotui.data.api.LibraryFolders
 import com.music.spotui.data.api.Response
 import com.music.spotui.data.api.SpotifySync
 import com.music.spotui.data.entity.LibraryEntry
+import com.music.spotui.data.api.PlaylistImport
+import com.music.spotui.data.api.PlaylistLink
+import com.music.spotui.data.api.PlaylistLinks
+import com.music.spotui.data.local.ImportedPlaylists
 import com.music.spotui.data.local.LocalItem
 import com.music.spotui.data.local.LocalPlaylists
 import com.music.spotui.data.local.LocalTrack
@@ -95,6 +99,7 @@ import com.music.spotui.ui.components.SwipeToRemove
 import com.music.spotui.ui.components.Loader
 import com.music.spotui.ui.components.SkeletonKind
 import com.music.spotui.ui.components.pressable
+import com.music.spotui.ui.navigation.importedPlaylistRoute
 import com.music.spotui.ui.navigation.localPlaylistRoute
 import com.music.spotui.ui.navigation.playlistRoute
 import com.music.spotui.ui.components.ProfileAvatar
@@ -127,6 +132,83 @@ fun NameDialog(title: String, initial: String, confirm: String, onDismiss: () ->
         },
         confirmButton = {
             TextButton(enabled = text.isNotBlank(), onClick = { onConfirm(text.trim()) }) { Text(confirm, color = Green) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.lbl_cancel), color = AppText) }
+        },
+    )
+}
+
+/**
+ * "Import playlist": paste a public playlist link, read its songs, name the list, keep it on
+ * this phone. Spotify links are read from Spotify's public pages (no account); an Amazon
+ * Music link is told apart and said to be unsupported, as its API is closed.
+ */
+@Composable
+fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var link by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var fetched by remember { mutableStateOf<PlaylistImport.Imported?>(null) }
+    var name by remember { mutableStateOf("") }
+    val fieldColors = TextFieldDefaults.colors(
+        focusedContainerColor = tone(0xFF3A3A3A), unfocusedContainerColor = tone(0xFF3A3A3A),
+        focusedTextColor = AppText, unfocusedTextColor = AppText, cursorColor = Green,
+        focusedIndicatorColor = Green, unfocusedIndicatorColor = Color.Transparent,
+    )
+    fun fetch() {
+        when (val parsed = PlaylistLinks.parse(link)) {
+            is PlaylistLink.Spotify -> {
+                busy = true; error = null
+                scope.launch {
+                    runCatching { PlaylistImport.fetchSpotify(parsed.id) }
+                        .onSuccess { fetched = it; name = it.name.ifBlank { context.getString(R.string.import_default_name) } }
+                        .onFailure { error = context.getString(R.string.import_failed) }
+                    busy = false
+                }
+            }
+            PlaylistLink.Amazon -> error = context.getString(R.string.import_amazon)
+            PlaylistLink.Unknown -> error = context.getString(R.string.import_bad_link)
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SheetColor,
+        title = { Text(stringResource(R.string.import_title), color = AppText) },
+        text = {
+            Column {
+                val got = fetched
+                if (got == null) {
+                    TextField(
+                        value = link, onValueChange = { link = it; error = null }, singleLine = true,
+                        label = { Text(stringResource(R.string.import_link_hint), color = AppMuted) },
+                        colors = fieldColors, modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    TextField(
+                        value = name, onValueChange = { name = it }, singleLine = true,
+                        label = { Text(stringResource(R.string.lbl_playlist), color = AppMuted) },
+                        colors = fieldColors, modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(stringResource(R.string.import_count, got.songs.size, got.total), color = AppMuted, fontSize = 13.sp,
+                        modifier = Modifier.padding(top = 10.dp))
+                }
+                if (busy) Text(stringResource(R.string.loading_playlists), color = AppMuted, fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 10.dp))
+                error?.let { Text(it, color = AppDestructive, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp)) }
+            }
+        },
+        confirmButton = {
+            val got = fetched
+            if (got == null) TextButton(enabled = link.isNotBlank() && !busy, onClick = { fetch() }) {
+                Text(stringResource(R.string.import_fetch), color = Green)
+            } else TextButton(enabled = name.isNotBlank(), onClick = {
+                val p = ImportedPlaylists.create(name, link.trim(), got.songs)
+                onDismiss()
+                navController.navigate(importedPlaylistRoute(p.id))
+            }) { Text(stringResource(R.string.import_button), color = Green) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.lbl_cancel), color = AppText) }
@@ -175,12 +257,14 @@ fun LibraryCreateSheet(navController: NavController, onDismiss: () -> Unit, onLi
             navController.navigate(localPlaylistRoute(p.id))
         }
         "blend" -> BlendSheet(navController, onDismiss)
+        "import" -> ImportPlaylistDialog(navController, onDismiss)
         else -> com.music.spotui.ui.components.LookSheet(onDismissRequest = onDismiss, containerColor = SheetColor) {
             Column(Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
                 SheetRow(Icons.AutoMirrored.Filled.PlaylistAdd, stringResource(R.string.lbl_playlist)) { asking = "playlist" }
                 SheetRow(Icons.Outlined.Group, stringResource(R.string.blend_title), stringResource(R.string.blend_detail)) { asking = "blend" }
                 SheetRow(Icons.Outlined.CreateNewFolder, stringResource(R.string.lbl_folder)) { asking = "folder" }
                 SheetRow(Icons.Outlined.PhoneAndroid, stringResource(R.string.local_playlist_new), stringResource(R.string.local_add_note)) { asking = "local" }
+                SheetRow(Icons.Outlined.Link, stringResource(R.string.import_playlist), stringResource(R.string.import_playlist_detail)) { asking = "import" }
             }
         }
     }

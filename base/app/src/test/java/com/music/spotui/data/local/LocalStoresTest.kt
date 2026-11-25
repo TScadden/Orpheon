@@ -32,6 +32,29 @@ class LocalStoresTest {
             LocalMetadata.decode("""{"version":1,"names":{"content://media/3":{"title":"","artist":"X"}}}"""))
     }
 
+    @Test fun importedPlaylistsSurviveARestartAsText() {
+        val p = ImportedPlaylists.create("Evening Mix", "https://open.spotify.com/playlist/xyz", listOf(
+            ImportedSong("", "AAA", "One", "Artist A", "Alb", 201_000L, "https://img/1"),
+            ImportedSong("", "BBB", "Two", "Artist B", "Other", 182_000L, ""),
+        ))
+        // Every row got its own key at import (the same song twice would be two rows).
+        assertTrue(p.items.all { it.key.isNotBlank() })
+        assertTrue(p.items[0].key != p.items[1].key)
+        ImportedPlaylists.rename(p.id, "Renamed Mix")
+        ImportedPlaylists.remove(p.id, p.items[0].key)
+        val text = ImportedPlaylists.write()
+        ImportedPlaylists.playlists.clear()
+        ImportedPlaylists.read(text)
+        val again = ImportedPlaylists.playlists.getValue(p.id)
+        assertEquals("Renamed Mix", again.name)
+        assertEquals("https://open.spotify.com/playlist/xyz", again.sourceUrl)
+        assertEquals(1, again.items.size)
+        assertEquals("BBB", again.items[0].spotifyTrackId)
+        assertEquals(182_000L, again.items[0].durationMs)
+        ImportedPlaylists.delete(p.id)
+        assertTrue(ImportedPlaylists.list().isEmpty())
+    }
+
     @Test fun aNameEditReachesPlaylistRowsAndAdditions() {
         LocalPlaylists.read(
             """{"version":1,"playlists":[{"id":"p1","name":"Mix","created":7,"items":[
