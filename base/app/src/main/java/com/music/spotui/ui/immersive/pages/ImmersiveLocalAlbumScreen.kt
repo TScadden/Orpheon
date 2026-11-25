@@ -39,7 +39,7 @@ import com.music.spotui.ui.immersive.components.ImmersivePage
 import com.music.spotui.ui.immersive.components.ImmersivePlayShuffleButtons
 import com.music.spotui.ui.immersive.sheets.ImmersiveSheet
 import com.music.spotui.ui.immersive.sheets.ImmersiveSheetRow
-import com.music.spotui.ui.theme.Immersive
+import com.music.spotui.ui.immersive.Immersive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -89,7 +89,7 @@ fun ImmersiveLocalAlbumScreen(navController: NavController, artist: String, albu
         title = album,
         subtitle = listOfNotNull(artist.takeIf { it.isNotBlank() },
             pluralStringResource(R.plurals.lbl_n_songs_s, list.size, list.size.toString()).takeIf { tracks != null })
-            .joinToString(" • ").ifBlank { null },
+            .joinToString(" • ").takeIf { it.isNotBlank() },
         onBack = { navController.navigateUp() },
         actions = {
             ImmersiveBarAction(Icons.Rounded.MoreHoriz, stringResource(R.string.lbl_more), onClick = { menu = true })
