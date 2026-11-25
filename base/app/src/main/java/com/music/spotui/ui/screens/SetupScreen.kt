@@ -33,6 +33,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -61,16 +63,20 @@ import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -424,28 +430,63 @@ private fun ExtensionsStep(onBrowse: () -> Unit, onLater: () -> Unit) {
  * the third-party notice, the one tick) is shown, one after the other; nothing is ever
  * installed without that prompt. A default no catalogue on this phone carries is said to be
  * unavailable. Continuing without installing is always there: the store offers them later.
+ *
+ * The sequence runs in the composition's own scope, one extension at a time: the step says
+ * which one it is setting up, waits while its prompt is open (the prompt is a single shared
+ * state), and a download that fails is said on the step, never swallowed. It must not run in
+ * a LaunchedEffect keyed on a queue the effect itself consumes: writing that queue cancels
+ * the effect, the cancellation landed inside the download, and the download's error handler
+ * treats a cancellation as no error at all — the button did nothing, silently (reported on
+ * Tyson's phone). Every other install button in the app launches from a plain scope, which
+ * is why only this step was broken.
  */
 @Composable
-private fun DefaultsStep(onNext: () -> Unit) {
+internal fun DefaultsStep(onNext: () -> Unit) {
     val context = LocalContext.current
     val repos by com.music.spotui.extensions.ExtensionStore.repos.collectAsState()
     val registry by com.music.spotui.extensions.Extensions.registry.collectAsState()
     LaunchedEffect(Unit) { com.music.spotui.extensions.ExtensionStore.refresh(com.music.spotui.extensions.Extensions.registry.value.repositories) }
     val catalogs = remember(repos) { com.music.spotui.extensions.ExtensionStore.read() }
     val stillLooking = repos.values.any { it.loading } || catalogs.isEmpty()
-    val installedNames = remember(registry) { registry.extensions.map { it.name }.toSet() }
-    val states = DefaultExtensions.NAMES.associateWith { DefaultExtensions.state(it, catalogs, installedNames, stillLooking) }
-    // The installs waiting for their prompt, offered one at a time (the prompt is a single
-    // shared state: the next is offered only once it clears).
-    var queue by remember { mutableStateOf<List<Pair<String, app.myspoti.extensions.Catalog.Entry>>>(emptyList()) }
-    val pendingNow by pending.collectAsState()
-    LaunchedEffect(queue, pendingNow) {
-        if (queue.isNotEmpty() && pendingNow == null) {
-            val (repo, entry) = queue.first()
-            queue = queue.drop(1)
-            installFromStore(context, repo, entry)
+    val installed = remember(registry) { registry.extensions.map { DefaultExtensions.Installed(it.id, it.name, it.version, it.versionCode) } }
+    val states = DefaultExtensions.NAMES.associateWith { DefaultExtensions.state(it, catalogs, installed, stillLooking) }
+
+    val scope = rememberCoroutineScope()
+    // The extension the sequence is on (downloading, or its prompt open), and the ones whose
+    // download failed: said on the step until it is tried again.
+    var working by remember { mutableStateOf<String?>(null) }
+    var failed by remember { mutableStateOf<List<String>>(emptyList()) }
+    var running by remember { mutableStateOf(false) }
+    val runningNow = rememberUpdatedState(running)
+    // Leaving the step mid-sequence abandons an offer still waiting for its answer, rather
+    // than leaving the shared prompt to surface on whatever screen comes next.
+    DisposableEffect(Unit) { onDispose { if (runningNow.value) pending.value = null } }
+
+    fun startInstalls(targets: List<Triple<String, String, app.myspoti.extensions.Catalog.Entry>>) {
+        if (running) return
+        running = true
+        failed = emptyList()
+        scope.launch {
+            try {
+                for ((name, repo, entry) in targets) {
+                    working = name
+                    val offered = runCatching { installFromStore(context, repo, entry) }
+                        .getOrElse { t -> if (t is kotlinx.coroutines.CancellationException) throw t else false }
+                    if (!offered) {
+                        failed = failed + name
+                        continue
+                    }
+                    // Its prompt is open: the next one is offered only once the prompt
+                    // clears (installed from it, or dismissed).
+                    pending.first { it == null }
+                }
+            } finally {
+                working = null
+                running = false
+            }
         }
     }
+
     InstallPrompt()
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 24.dp),
@@ -458,6 +499,7 @@ private fun DefaultsStep(onNext: () -> Unit) {
         DefaultExtensions.NAMES.forEach { name ->
             val detail = when (val s = states.getValue(name)) {
                 DefaultExtensions.State.Installed -> stringResource(R.string.setup_defaults_installed)
+                is DefaultExtensions.State.Update -> stringResource(R.string.setup_defaults_update, s.entry.version, s.installedVersion)
                 is DefaultExtensions.State.Ready -> stringResource(R.string.setup_defaults_ready, s.entry.version)
                 DefaultExtensions.State.Unavailable -> stringResource(R.string.setup_defaults_unavailable)
                 DefaultExtensions.State.Looking -> stringResource(R.string.setup_defaults_looking)
@@ -465,11 +507,48 @@ private fun DefaultsStep(onNext: () -> Unit) {
             InfoRow(Icons.Rounded.Extension, name, detail, Modifier.riseIn(row++))
         }
         Spacer(Modifier.height(12.dp))
-        val ready = states.values.filterIsInstance<DefaultExtensions.State.Ready>()
+        val targets = DefaultExtensions.NAMES.mapNotNull { name ->
+            when (val s = states.getValue(name)) {
+                is DefaultExtensions.State.Ready -> Triple(name, s.repo, s.entry)
+                is DefaultExtensions.State.Update -> Triple(name, s.repo, s.entry)
+                else -> null
+            }
+        }
         Column(Modifier.riseIn(row), horizontalAlignment = Alignment.CenterHorizontally) {
-            if (ready.isNotEmpty()) SetupButton(stringResource(R.string.setup_defaults_install), {
-                queue = ready.map { it.repo to it.entry }
-            }, Modifier.fillMaxWidth().height(50.dp))
+            when {
+                running -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(50.dp)) {
+                    CircularProgressIndicator(
+                        color = if (isImmersive()) Color.White else AppAccent,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        stringResource(R.string.setup_defaults_busy, working ?: ""),
+                        color = if (isImmersive()) Color.White else AppText,
+                        fontSize = 15.sp,
+                        modifier = Modifier.padding(start = 10.dp),
+                    )
+                }
+                targets.isNotEmpty() -> SetupButton(
+                    stringResource(
+                        if (targets.any { states.getValue(it.first) is DefaultExtensions.State.Ready }) {
+                            R.string.setup_defaults_install
+                        } else {
+                            R.string.extensions_update
+                        },
+                    ),
+                    { startInstalls(targets) },
+                    Modifier.fillMaxWidth().height(50.dp),
+                )
+            }
+            if (failed.isNotEmpty()) {
+                Text(
+                    stringResource(R.string.setup_defaults_failed, failed.joinToString(", ")),
+                    color = Problem,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+            }
             SetupLinkButton(stringResource(R.string.setup_continue), onNext, Modifier.fillMaxWidth().height(48.dp))
         }
     }

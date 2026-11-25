@@ -57,6 +57,9 @@
     <string name="setup_defaults_ready">Version %1$s, ready to install</string>
     <string name="setup_defaults_unavailable">Not in the stores this phone can see</string>
     <string name="setup_defaults_looking">Looking in the stores…</string>
+    <string name="setup_defaults_update">Update available: version %1$s (you have %2$s)</string>
+    <string name="setup_defaults_busy">Setting up %1$s…</string>
+    <string name="setup_defaults_failed">Couldn\'t fetch %1$s. Check your connection, or install it later from the Extensions store.</string>
     <string name="imported_playlist_subtitle">Imported from Spotify</string>
     <string name="imported_playlist_gone">This imported playlist is gone.</string>
     <string name="import_playlist">Import playlist</string>

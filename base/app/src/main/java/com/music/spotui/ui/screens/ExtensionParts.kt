@@ -129,20 +129,27 @@ internal fun toastError(ctx: Context, t: Throwable) {
     Toast.makeText(ctx.applicationContext, ctx.getString(R.string.extensions_error, t.message ?: t.toString()), Toast.LENGTH_LONG).show()
 }
 
-/** Reads [zip] and opens the install prompt; a refused package says why. */
-internal fun offer(ctx: Context, zip: ByteArray, source: String, origin: app.myspoti.extensions.Origin? = null) {
+/** Reads [zip] and opens the install prompt; a refused package says why. True when the prompt was offered. */
+internal fun offer(ctx: Context, zip: ByteArray, source: String, origin: app.myspoti.extensions.Origin? = null): Boolean =
     runCatching { ExtensionPackage.read(zip).localized(Extensions.language()) }
         .onSuccess { p -> pending.value = PendingInstall(zip, p, source, Extensions.plan(p), origin) }
         .onFailure { toastError(ctx, it) }
-}
+        .isSuccess
 
-/** Downloads a repository's package for [entry] (a spinner on its button meanwhile), then the prompt. */
-internal suspend fun installFromStore(ctx: Context, repo: String, entry: Catalog.Entry) {
+/**
+ * Downloads a repository's package for [entry] (a spinner on its button meanwhile), then the prompt.
+ * True when the prompt was offered; false when the download or the package failed (already
+ * said in a toast) — a caller running several in a row needs the answer to say so on its own
+ * screen and to know whether a prompt is now waiting for the user.
+ */
+internal suspend fun installFromStore(ctx: Context, repo: String, entry: Catalog.Entry): Boolean {
     ExtensionStore.busy.value = ExtensionStore.busy.value + entry.id
-    runCatching { Extensions.fetch(repo, entry) }
-        .onSuccess { f -> offer(ctx, f.zip, f.origin?.let { "https://github.com/${it.repo}" } ?: repo, f.origin) }
+    val offered = runCatching { Extensions.fetch(repo, entry) }
+        .map { f -> offer(ctx, f.zip, f.origin?.let { "https://github.com/${it.repo}" } ?: repo, f.origin) }
         .onFailure { toastError(ctx, it) }
+        .getOrDefault(false)
     ExtensionStore.busy.value = ExtensionStore.busy.value - entry.id
+    return offered
 }
 
 /** The system file picker, for a package (.zip). */
