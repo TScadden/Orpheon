@@ -186,8 +186,9 @@ dependencies {
     implementation("com.google.android.gms:play-services-wearable:20.0.1")
     // The watch's app, embedded in this one: a paired watch offers Scadify under "Apps on your
     // phone". Same application id and signature as this app (the :wear build mirrors the -Pclean
-    // suffix), which is what lets the two link over the Data Layer at all.
-    wearApp(project(":wear"))
+    // suffix), which is what lets the two link over the Data Layer at all. (The wearApp
+    // configuration has no type-safe accessor in this AGP's Kotlin DSL: named by string.)
+    "wearApp"(project(":wear"))
     // AutoMix: song analysis and transition planning (pure Kotlin), Beat This on ONNX Runtime.
     implementation(project(":automix"))
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.2")
