@@ -147,6 +147,8 @@ class MainActivity : AppCompatActivity() {
                         }
                         // A pass QR code scanned with the camera: the yes before sending this phone's setup.
                         if (signedIn) com.music.spotui.pass.PassLinkHost()
+                        // A playlist file opened with the app or shared to it: its import confirmation.
+                        if (signedIn) com.music.spotui.share.ShareImportHost()
                         // "Ask each time": the download quality question, above every screen.
                         com.music.spotui.ui.components.DownloadAskHost()
                         // An extension asking the user's yes before a change.
@@ -337,7 +339,24 @@ class MainActivity : AppCompatActivity() {
     private fun handle(intent: Intent?) {
         intent ?: return
         when (intent.action) {
+            Intent.ACTION_SEND -> {
+                // A .scadifyplaylist file shared to the app: its import confirmation, never an import on its own.
+                val stream = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, android.net.Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION") (intent.getParcelableExtra(Intent.EXTRA_STREAM) as? android.net.Uri)
+                }
+                if (stream != null && intent.type == com.music.spotui.share.ShareZip.MIME) {
+                    com.music.spotui.share.ShareInbox.offer(stream)
+                }
+            }
             Intent.ACTION_VIEW -> {
+                // A .scadifyplaylist file opened with the app (best effort: the type is what
+                // carries it — Android matches extensions to types inconsistently).
+                if (intent.type == com.music.spotui.share.ShareZip.MIME && intent.data != null) {
+                    com.music.spotui.share.ShareInbox.offer(intent.data!!)
+                    return
+                }
                 val link = intent.data?.toString() ?: return
                 // A pass QR code opened by the camera (orpheon://pass?…): its confirmation, never a send on its own.
                 com.music.spotui.pass.PassLinks.offer(this, link, signedIn)

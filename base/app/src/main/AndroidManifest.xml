@@ -132,6 +132,22 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="orpheon-pass" />
             </intent-filter>
+            <!-- A playlist file (.scadifyplaylist) opened with the app or shared to it: it lands
+                 on the import confirmation (ShareInbox); nothing is imported without the user's
+                 yes. The filter keys on the type the sending side declares — Android matches
+                 file extensions to types inconsistently, so the in-app picker in the Library
+                 is the door that always works. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/vnd.scadify.playlist+zip" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/vnd.scadify.playlist+zip" />
+            </intent-filter>
         </activity>
 
         <!-- Supporter icons (SupportReminder.setIcon), off with the supporter perks: re-enabling
