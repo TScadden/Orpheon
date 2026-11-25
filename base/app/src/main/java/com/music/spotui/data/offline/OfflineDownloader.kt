@@ -386,7 +386,7 @@ object OfflineDownloader {
      * meanwhile are tried. Unavailable when no extension has a file, or none of them could be used.
      */
     private suspend fun resolveAndFetch(r: Request, meta: Meta, out: File, quality: com.music.spotui.data.preferences.DownloadQuality): Fetched {
-        val track = com.music.spotui.extensions.Extensions.trackInfo(r.trackId, meta.title, meta.artist, meta.album, meta.durationMs, meta.coverUrl)
+        val track = com.music.spotui.extensions.Extensions.trackInfo(meta.downloadId.ifBlank { r.trackId }, meta.title, meta.artist, meta.album, meta.durationMs, meta.coverUrl)
             .copy(isrc = meta.isrc)
         val seen = mutableListOf<String>()
         var tried = 0
@@ -512,16 +512,23 @@ object OfflineDownloader {
     private data class Meta(
         val title: String, val artist: String, val album: String, val albumId: String,
         val durationMs: Long, val coverUrl: String, val isrc: String?,
+        /** The id the download source is asked for, when it differs from the request's own key. */
+        val downloadId: String = "",
     )
 
-    /** The request, completed by Spotify's track (ISRC, and anything the list lacked). */
+    /**
+     * The request, completed by the track's own record (ISRC, and anything the list
+     * lacked): Spotify's when the id is a Spotify id. When Spotify has no such track
+     * — a provider-keyed id, or no account for Spotify to answer through — the
+     * catalog chain's record of the same track completes it instead ([catalogMeta]).
+     */
     private suspend fun spotifyMeta(r: Request): Meta {
         val api = app.myspoti.host.android.MyspotiRuntime.api
         val uri = "spotify:track:${r.trackId}"
         val t = runCatching { api.catalog.track(uri) }.onFailure { Log.w(TAG, "${r.title}: Spotify track: $it") }.getOrNull()
         val isrc = runCatching { api.catalog.isrc(uri) }.onFailure { Log.w(TAG, "${r.title}: ISRC: $it") }.getOrNull()
         val cover = r.coverUrl.ifBlank { t?.album?.images?.maxByOrNull { it.width ?: 0 }?.url.orEmpty() }
-        return Meta(
+        val meta = Meta(
             title = r.title.ifBlank { t?.name.orEmpty() },
             artist = r.artist.ifBlank { t?.artists?.joinToString(", ") { it.name }.orEmpty() },
             album = r.album.ifBlank { t?.album?.name.orEmpty() },
@@ -529,7 +536,47 @@ object OfflineDownloader {
             durationMs = r.durationMs.takeIf { it > 0 } ?: t?.durationMs ?: 0L,
             coverUrl = cover,
             isrc = isrc?.let(::normalizeIsrc),
-        ).also { if (it.title.isBlank() || it.artist.isBlank()) throw Unavailable("no track metadata") }
+        )
+        val resolved = if (t == null) catalogMeta(r, meta) else meta
+        return resolved.also { if (it.title.isBlank() || it.artist.isBlank()) throw Unavailable("no track metadata") }
+    }
+
+    /**
+     * [meta] completed from the catalog chain for a provider-keyed track: the
+     * provider's own record of the track (its ISRC above all — the download source
+     * matches on it), cross-matched to the Spotify record when the chain carries a
+     * Spotify provider. [meta] stands unchanged when the id is no catalog key or
+     * the catalog has nothing for it.
+     */
+    private suspend fun catalogMeta(r: Request, meta: Meta): Meta {
+        val uri = com.music.spotui.data.catalog.CatalogRuntime.uriOfKey(r.trackId) ?: return meta
+        val item = runCatching { app.myspoti.catalog.ItemUri.parse(uri) }.getOrNull() ?: return meta
+        val chain = com.music.spotui.data.catalog.CatalogRuntime.chain()
+        var hit = runCatching { chain.providerOf(item.provider)?.track(item.id) }
+            .onFailure { Log.w(TAG, "${r.title}: catalog track: $it") }.getOrNull()
+        if (hit == null && r.title.isNotBlank()) {
+            hit = runCatching { chain.resolve(r.title, r.artist, r.durationMs, null) }
+                .onFailure { Log.w(TAG, "${r.title}: catalog resolve: $it") }.getOrNull()
+        }
+        hit ?: return meta
+        // The same recording on Spotify, when the chain carries a Spotify provider
+        // (the accountless chain does not: the provider's ISRC is then the match).
+        val spotifyHit = if (item.provider == "spotify") null else runCatching {
+            chain.counterpartOn("spotify", hit.track.name, hit.track.artists.firstOrNull()?.name.orEmpty(), hit.track.durationMs, hit.isrc)
+        }.onFailure { Log.w(TAG, "${r.title}: spotify counterpart: $it") }.getOrNull()
+        val dm = DownloadMeta.merge(
+            DownloadMeta(
+                downloadId = r.trackId, isrc = meta.isrc, title = meta.title, artist = meta.artist,
+                album = meta.album, albumId = meta.albumId, durationMs = meta.durationMs, coverUrl = meta.coverUrl,
+            ),
+            hit, spotifyHit,
+        )
+        Log.i(TAG, "${r.title}: catalog meta via ${item.provider}: isrc=${dm.isrc ?: "-"}, downloadId=${dm.downloadId}")
+        return Meta(
+            title = dm.title, artist = dm.artist, album = dm.album, albumId = dm.albumId,
+            durationMs = dm.durationMs, coverUrl = dm.coverUrl.orEmpty(), isrc = dm.isrc,
+            downloadId = dm.downloadId,
+        )
     }
 
     // Covers and other plain files of the downloads (not music video): data saver aware, as before.

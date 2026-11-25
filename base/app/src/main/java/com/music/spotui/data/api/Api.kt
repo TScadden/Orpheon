@@ -320,7 +320,13 @@ class Api constructor(
 
     /** Artists the user follows (library "Artists" filter). */
     suspend fun getFollowedArtists(): List<ArtistsModel> {
-        if (!ready()) return emptyList()
+        // Artists followed on this phone (LocalFollows): the platform's library
+        // keeps nothing, so its list can never carry them; they are merged in
+        // here, on top (they are the newest follows of this phone).
+        val local = com.music.spotui.data.local.LocalFollows.items.map {
+            ArtistsModel(it.name, it.image, idOf(it.uri), "")
+        }
+        if (!ready()) return local
         val out = ArrayList<ArtistsModel>()
         var offset = 0
         while (true) {
@@ -328,7 +334,9 @@ class Api constructor(
             page.items.filter { it.kind == MediaKind.ARTIST }.forEach { out += ArtistsModel(it.name, cover(it.images), it.uri.substringAfterLast(':'), it.addedAt.orEmpty()) }
             offset = page.nextOffset ?: break
         }
-        return out
+        if (local.isEmpty()) return out
+        val localIds = local.mapTo(HashSet()) { it.id }
+        return local + out.filter { it.id !in localIds }
     }
 
     /**
@@ -876,7 +884,7 @@ class Api constructor(
             SongsModel(
                 id = stableId("localfile:" + item.uri),
                 title = item.title, album = item.album, singer = item.artist,
-                coverUri = item.artUri, url = "local:" + item.uri,
+                coverUri = com.music.spotui.data.local.LocalCovers.effectiveArt(item), url = "local:" + item.uri,
                 durationMs = item.durationMs.toInt(),
             )
         }

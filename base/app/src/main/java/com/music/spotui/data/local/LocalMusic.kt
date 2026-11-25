@@ -111,9 +111,23 @@ object LocalMusic {
                 )
             }
         }
-        // The names the user gave files inside the app win over the files' tags.
+        // Which of these albums MediaStore actually has art for: the cover chain
+        // (LocalCovers) stands an album's cover in only where a file's own art is absent.
+        LocalCovers.init(context)
+        val seenArt = HashSet<String>()
+        for (t in out) {
+            val art = t.artUri.toString()
+            if (seenArt.add(art)) {
+                val exists = runCatching {
+                    context.contentResolver.openInputStream(t.artUri)?.use { true } ?: false
+                }.getOrDefault(false)
+                LocalCovers.noteArtPresence(art, exists)
+            }
+        }
+        // The names the user gave files inside the app win over the files' tags,
+        // and their covers win over the files' art.
         LocalMetadata.init(context)
-        val named = out.map { LocalMetadata.apply(it) }
+        val named = out.map { LocalCovers.apply(LocalMetadata.apply(it)) }
         cache = named
         named
     }

@@ -1012,6 +1012,11 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
                         }
                         // Once per list, not at every redraw of the header (6000 songs, mapped each time).
                         val ids = remember(p.tracks) { p.tracks.map { it.spotifyTrackId }.filter { it.isNotBlank() }.distinct() }
+                        // Phone files in the list have nothing to download (and must never
+                        // enter the offline store): the confirmation names the split.
+                        val split = remember(p.tracks) {
+                            com.music.spotui.data.offline.DownloadSplit.of(p.tracks.map { it.url to it.spotifyTrackId })
+                        }
                         // Songs with no matching recording count as settled: the list can still be removed.
                         val downloadedCount = ids.count {
                             com.music.spotui.data.offline.OfflineStore.isDownloaded(it) ||
@@ -1030,7 +1035,9 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
                                 com.music.spotui.ui.components.DownloadAsk.start(context) { q ->
                                     com.music.spotui.di.Haptics.confirm()
                                     com.music.spotui.data.offline.OfflineCollections.download(p, q)
-                                    android.widget.Toast.makeText(context, context.getString(R.string.lbl_downloading), android.widget.Toast.LENGTH_SHORT).show()
+                                    val note = if (split.localFiles > 0) context.getString(R.string.download_split_notice, split.downloadable, split.localFiles)
+                                        else context.getString(R.string.lbl_downloading)
+                                    android.widget.Toast.makeText(context, note, android.widget.Toast.LENGTH_SHORT).show()
                                 }
                             }
                         }
@@ -1231,7 +1238,11 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
                     Text(stringResource(R.string.local_added_section), color = AppText, fontSize = 18.sp, fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(16.dp, 20.dp, 16.dp, 4.dp))
                 }
-                localItems(additions, p.name, onRemove = { com.music.spotui.data.local.LocalPlaylists.removeFromSpotify(playlistId, it.key) })
+                localItems(additions, p.name, onRemove = { com.music.spotui.data.local.LocalPlaylists.removeFromSpotify(playlistId, it.key) },
+                    onShowAlbum = { item ->
+                        if (item.album.isNotBlank()) navController.navigate(com.music.spotui.ui.navigation.localAlbumRoute(item.artist, item.album))
+                        else android.widget.Toast.makeText(context, context.getString(R.string.local_no_album), android.widget.Toast.LENGTH_SHORT).show()
+                    })
             }
         }
         // An album: Spotify's "More like this", albums close to its first song.

@@ -141,6 +141,9 @@ fun SongOptionsSheet(
         return
     }
     val hasId = song.spotifyTrackId.isNotBlank()
+    // A phone file in a list (Liked Songs): its album is the phone's files of that
+    // name, never the catalog album the name happens to match.
+    val isLocalFile = com.music.spotui.data.local.LocalAlbums.isLocalRow(song.url, song.spotifyTrackId)
     // A Live Radio station playing right now: no queue, album or artist page of its own, but
     // (unlike a track with no Spotify id) a name and homepage worth sharing.
     val isRadio = nowPlaying && com.music.spotui.radio.RadioPlayer.current() != null
@@ -258,9 +261,12 @@ fun SongOptionsSheet(
                     navigate = { route -> navController.navigate(route) },
                     onFailed = { toast(context.getString(R.string.song_radio_failed)) })
             }
-            MenuRow(Icons.Default.Album, stringResource(R.string.lbl_open_album), enabled = !isRadio && (song.album.isNotBlank() || song.albumId.isNotBlank())) {
+            MenuRow(Icons.Default.Album, stringResource(R.string.lbl_open_album), enabled = !isRadio && (isLocalFile || song.album.isNotBlank() || song.albumId.isNotBlank())) {
                 onDismiss()
-                navController.navigate(albumRoute(song.album, song.singer, song.albumId))
+                if (isLocalFile) {
+                    if (song.album.isNotBlank()) navController.navigate(com.music.spotui.ui.navigation.localAlbumRoute(song.singer, song.album))
+                    else toast(context.getString(R.string.local_no_album))
+                } else navController.navigate(albumRoute(song.album, song.singer, song.albumId))
             }
             MenuRow(Icons.Outlined.Person, stringResource(R.string.lbl_open_artist), enabled = !isRadio && song.singer.isNotBlank()) {
                 onDismiss()

@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -105,6 +106,11 @@ fun DownloadsScreen(navController: NavController) {
             }
         }
     }
+    // The phone's own files: not downloads (the offline store's remove would delete
+    // the user's music), listed apart under "On this phone" so a liked phone file
+    // is visibly here. Null until read.
+    var localTracks by remember { mutableStateOf<List<com.music.spotui.data.local.LocalTrack>?>(null) }
+    LaunchedEffect(Unit) { localTracks = com.music.spotui.data.local.LocalMusic.tracks(context) }
     val np by SongPlayer.nowPlaying
     val playingHere = LocalPlayer.active.value && LocalPlayer.contextName == title
     var menuSong by remember { mutableStateOf<SongsModel?>(null) }
@@ -117,7 +123,7 @@ fun DownloadsScreen(navController: NavController) {
     }
 
     Box(Modifier.fillMaxSize().background(AppBackground)) {
-        if (tracks.isEmpty() && waiting.isEmpty()) Column(
+        if (tracks.isEmpty() && waiting.isEmpty() && localTracks?.isEmpty() == true) Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
             modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
@@ -144,6 +150,7 @@ fun DownloadsScreen(navController: NavController) {
                     Text(pluralStringResource(R.plurals.local_files_count, n, n) + " · " + stringResource(R.string.downloads_size, size),
                         color = AppMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
                     Text(stringResource(R.string.downloads_source), color = AppMuted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                    Text(stringResource(R.string.downloads_local_note), color = AppMuted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                     Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Spacer(Modifier.weight(1f))
                         Icon(painterResource(R.drawable.ic_player_shuffle), stringResource(R.string.lbl_shuffle), tint = AppText,
@@ -290,6 +297,31 @@ fun DownloadsScreen(navController: NavController) {
                     Icon(Icons.Default.MoreVert, stringResource(R.string.lbl_more), tint = AppText.copy(alpha = 0.7f),
                         modifier = Modifier.size(24.dp).pressable(0.96f) { menuSong = OfflineStore.toSong(t) })
                 } }
+            }
+            // The phone's own files, apart from the downloads: no remove here — they
+            // are the user's files, not Scadify's copies. A tap plays, as in Local Files.
+            val locals = localTracks.orEmpty()
+            if (locals.isNotEmpty()) {
+                item(key = "phone_title") { SectionTitle(stringResource(R.string.downloads_on_this_phone)) }
+                itemsIndexed(locals, key = { _, t -> "p:" + t.id }) { index, t ->
+                    val current = LocalPlayer.active.value && np.uri == "local:${t.id}"
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                            .pressable(0.97f) { LocalPlayer.play(locals, index, context = context.getString(R.string.downloads_on_this_phone)) }
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                    ) {
+                        GlideImage(
+                            model = t.artUri, contentDescription = null, contentScale = ContentScale.Crop,
+                            loading = placeholder(R.drawable.placeholder), failure = placeholder(R.drawable.local_files_cover),
+                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
+                        )
+                        Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                            Text(t.title, color = if (current) com.music.spotui.ui.theme.AppAccent else AppText, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (t.artist.isNotBlank()) Text(t.artist, color = AppMuted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
             }
             item { Spacer(Modifier.height(com.music.spotui.ui.components.bottomBarsSpace())) }
         }

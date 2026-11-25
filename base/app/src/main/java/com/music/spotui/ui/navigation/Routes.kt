@@ -30,6 +30,7 @@ sealed class Routes(
     object Equalizer : Routes(0, "Equalizer", "equalizer")
     object Folder : Routes(0, "Folder", "folder")
     object LocalPlaylist : Routes(0, "LocalPlaylist", "localplaylist")
+    object LocalAlbum : Routes(0, "LocalAlbum", "localalbum")
     object ImportedPlaylist : Routes(0, "ImportedPlaylist", "importedplaylist")
     object Category : Routes(0, "Category", "category")
     object NewReleases : Routes(0, "NewReleases", "newreleases")
@@ -71,6 +72,10 @@ fun folderRoute(uri: String, name: String): String =
 
 /** A playlist kept on this phone (LocalPlaylists id). */
 fun localPlaylistRoute(id: String): String = "${Routes.LocalPlaylist.route}/${android.net.Uri.encode(id)}"
+
+/** An album of the phone's own files: the files sharing an effective album name (and artist). */
+fun localAlbumRoute(artist: String, album: String): String =
+    "${Routes.LocalAlbum.route}?name=${android.net.Uri.encode(album)}&artist=${android.net.Uri.encode(artist)}"
 
 /** A playlist imported from a public link, by its store id (see ImportedPlaylists). */
 fun importedPlaylistRoute(id: String): String = "${Routes.ImportedPlaylist.route}/${android.net.Uri.encode(id)}"
