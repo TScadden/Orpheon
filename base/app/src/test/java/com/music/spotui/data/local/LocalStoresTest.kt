@@ -89,6 +89,31 @@ class LocalStoresTest {
         ImportedPlaylists.delete("old1")
     }
 
+    @Test fun storedIsrcsAreFilledWithoutTouchingTheOnesAlreadyThere() {
+        // The backfill for playlists imported before ISRCs were kept: blanks are filled
+        // from the fresh reading, a song that already carries one keeps it, and a song
+        // the reading does not know stays blank.
+        val p = ImportedPlaylists.create("Backfill", "https://open.spotify.com/playlist/bf", listOf(
+            ImportedSong("", "AAA", "One", "Artist A", "Alb", 201_000L, ""),
+            ImportedSong("", "BBB", "Two", "Artist B", "Other", 182_000L, "", "USS1Z2500002"),
+            ImportedSong("", "CCC", "Three", "Artist C", "Third", 100_000L, ""),
+        ))
+        val filled = ImportedPlaylists.fillIsrcs(p.id, mapOf(
+            "AAA" to "USS1Z2500001", "BBB" to "USXXX2500099", "ZZZ" to "USS1Z2500099",
+        ))
+        assertEquals(1, filled)
+        val after = ImportedPlaylists.playlists.getValue(p.id)
+        assertEquals("USS1Z2500001", after.items[0].isrc)
+        assertEquals("USS1Z2500002", after.items[1].isrc)
+        assertEquals("", after.items[2].isrc)
+        // And what was filled is what a restart reads back.
+        val text = ImportedPlaylists.write()
+        ImportedPlaylists.playlists.clear()
+        ImportedPlaylists.read(text)
+        assertEquals("USS1Z2500001", ImportedPlaylists.playlists.getValue(p.id).items[0].isrc)
+        ImportedPlaylists.delete(p.id)
+    }
+
     @Test fun anImportedSongIsImportedOncePerTrackId() {
         // The store's no-duplicates rule, at import: a source list naming the same track
         // twice imports it once (first listing first); a song with no track id cannot be

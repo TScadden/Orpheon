@@ -30,6 +30,7 @@ import com.music.spotui.data.entity.PodcastModel
 import com.music.spotui.data.entity.SearchResults
 import com.music.spotui.data.entity.ShowPage
 import com.music.spotui.data.entity.SongsModel
+import com.music.spotui.data.local.ImportedPlaylist
 import com.music.spotui.data.local.ImportedPlaylists
 import com.music.spotui.data.local.ImportedSong
 import com.music.spotui.data.local.ListenHistory
@@ -38,6 +39,7 @@ import com.music.spotui.data.local.LocalMusic
 import com.music.spotui.di.Graph
 import com.music.spotui.di.SongPlayer
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -56,6 +58,10 @@ class Api constructor(
     private val api: MyspotiApi get() = MyspotiRuntime.api
 
     private fun stableId(key: String): Int = key.hashCode() and 0x7fffffff
+
+    /** Imported playlists whose stored songs' ISRC backfill has been attempted this run. */
+    private val isrcBackfillAttempted = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val isrcBackfillScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
 
     /** Process-level caches: screens show the last result at once, then refresh. */
     companion object HomeCache {
@@ -1007,6 +1013,7 @@ class Api constructor(
     fun getImportedPlaylistPage(id: String): Flow<Response<ContextPageModel>> = flow {
         val p = ImportedPlaylists.get(id)
         if (p == null) { emit(Response.Error(context.getString(R.string.imported_playlist_gone))); return@flow }
+        maybeBackfillIsrcs(p)
         emit(Response.Success(ContextPageModel(
             uri = "scadify:imported:$id",
             type = "imported",
@@ -1018,6 +1025,27 @@ class Api constructor(
             tracks = p.items.map(::importedSongOf),
             complete = true,
         )))
+    }
+
+    /**
+     * A playlist imported before imports kept ISRCs has none stored: its songs then match
+     * sources the slow way — a live lookup that cannot answer for a bare Spotify id in the
+     * accountless chain, so they can fail to play or download at all. The store kept the
+     * playlist's source link, so when such a playlist is opened it is re-read once, in the
+     * background, and the ISRCs the fresh reading states are filled in. Once per playlist
+     * per run, off the page's own path; any failure leaves the songs exactly as they are.
+     */
+    private fun maybeBackfillIsrcs(p: ImportedPlaylist) {
+        if (p.items.none { it.isrc.isBlank() && it.spotifyTrackId.isNotBlank() }) return
+        val link = PlaylistLinks.parse(p.sourceUrl) as? PlaylistLink.Spotify ?: return
+        if (!isrcBackfillAttempted.add(p.id)) return
+        isrcBackfillScope.launch {
+            runCatching {
+                val fresh = PlaylistImport.fetchSpotify(link.id)
+                val byId = fresh.songs.mapNotNull { s -> s.isrc.takeIf { it.isNotBlank() }?.let { s.spotifyTrackId to it } }.toMap()
+                if (byId.isNotEmpty()) ImportedPlaylists.fillIsrcs(p.id, byId)
+            }.onFailure { if (it !is CancellationException) Log.w("Api", "ISRC backfill for ${p.name}: $it") }
+        }
     }
 
     /**

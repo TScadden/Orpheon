@@ -126,6 +126,26 @@ object ImportedPlaylists {
     fun remove(id: String, key: String) =
         update { playlists[id]?.let { playlists[id] = it.copy(items = it.items.filterNot { s -> s.key == key }) } }
 
+    /**
+     * Fills the ISRCs of a stored playlist's songs from [isrcByTrackId] (Spotify track id →
+     * ISRC): only songs that have none are filled — a song that already carries one keeps
+     * it, and a song the map does not know is left as it is. For playlists imported before
+     * imports kept ISRCs (see Api's backfill on the playlist page). How many were filled.
+     */
+    fun fillIsrcs(id: String, isrcByTrackId: Map<String, String>): Int {
+        var filled = 0
+        update {
+            playlists[id]?.let { p ->
+                val items = p.items.map { s ->
+                    val found = isrcByTrackId[s.spotifyTrackId]?.takeIf { it.isNotBlank() }
+                    if (s.isrc.isBlank() && found != null) { filled++; s.copy(isrc = found) } else s
+                }
+                if (filled > 0) playlists[id] = p.copy(items = items)
+            }
+        }
+        return filled
+    }
+
     private fun update(change: () -> Unit) {
         synchronized(lock) {
             ensureLoaded()
