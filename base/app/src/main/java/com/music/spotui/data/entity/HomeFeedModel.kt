@@ -114,4 +114,19 @@ sealed class HomeItem {
         val subtitle: String,
         val id: String = "",
     ) : HomeItem()
+
+    /**
+     * A single song (the built-in shelves: the public chart, this phone's own listening).
+     * [id]: its Spotify track id when it has one; [playUrl]: what plays it (a catalog play
+     * address, or a Spotify play query), as a song row's url elsewhere.
+     */
+    @kotlinx.serialization.Serializable
+    data class Track(
+        val id: String = "",
+        override val name: String,
+        override val imageUrl: String,
+        val subtitle: String,
+        val playUrl: String = "",
+        val album: String = "",
+    ) : HomeItem()
 }

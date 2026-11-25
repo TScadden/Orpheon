@@ -53,5 +53,7 @@ internal fun onHomeItemClick(navController: NavController, item: HomeItem) {
             if (item.id == Api.HomeCache.LIKED_SONGS_ID) navController.navigate(Routes.Liked.route)
             else if (item.id.isNotBlank()) navController.navigate(playlistRoute(item.id, item.name))
             else navController.navigate(albumRoute(item.name))
+        // A single song of a built-in shelf: it plays where it stands.
+        is HomeItem.Track -> if (item.playUrl.isNotBlank()) SongPlayer.playSong(item.playUrl)
     }
 }

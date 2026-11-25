@@ -50,6 +50,9 @@
     <string name="home_error">Couldn\'t load Home.\nCheck your connection and try again.</string>
     <string name="home_retry">Try again</string>
     <string name="home_empty">Nothing to show yet.</string>
+    <string name="home_continue_listening">Continue listening</string>
+    <string name="home_frequent_plays">Your frequent plays</string>
+    <string name="home_popular_week">Popular this week</string>
     <string name="spotify_account">Account</string>
     <string name="spotify_user">User</string>
     <string name="list_view">Show as list</string>
