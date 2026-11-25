@@ -427,14 +427,16 @@ fun FolderScreen(navController: NavController, uri: String, initialName: String)
 }
 
 /**
- * "Edit title / artist" for a phone file: two fields, saved with [onSave]. The file
- * itself is never changed — the app keeps the names (LocalMetadata) and shows them
- * for the file everywhere.
+ * "Edit title / artist" for a phone file: three fields (the album too), saved with
+ * [onSave]. The file itself is never changed — the app keeps the names (LocalMetadata)
+ * and shows them for the file everywhere. The album starts from the file's effective
+ * album; emptying it leaves the file's own album in place (no album override).
  */
 @Composable
-fun EditLocalTrackDialog(title: String, artist: String, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+fun EditLocalTrackDialog(title: String, artist: String, album: String, onDismiss: () -> Unit, onSave: (String, String, String) -> Unit) {
     var newTitle by remember { mutableStateOf(title) }
     var newArtist by remember { mutableStateOf(artist) }
+    var newAlbum by remember { mutableStateOf(album) }
     val fieldColors = TextFieldDefaults.colors(
         focusedContainerColor = tone(0xFF3A3A3A), unfocusedContainerColor = tone(0xFF3A3A3A),
         focusedTextColor = AppText, unfocusedTextColor = AppText, cursorColor = Green,
@@ -453,12 +455,16 @@ fun EditLocalTrackDialog(title: String, artist: String, onDismiss: () -> Unit, o
                 TextField(value = newArtist, onValueChange = { newArtist = it }, singleLine = true,
                     label = { Text(stringResource(R.string.local_edit_song_artist), color = AppMuted) },
                     colors = fieldColors, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+                TextField(value = newAlbum, onValueChange = { newAlbum = it }, singleLine = true,
+                    label = { Text(stringResource(R.string.local_edit_song_album), color = AppMuted) },
+                    colors = fieldColors, modifier = Modifier.fillMaxWidth())
                 Text(stringResource(R.string.local_edit_song_note), color = AppMuted, fontSize = 12.sp,
                     modifier = Modifier.padding(top = 10.dp))
             }
         },
         confirmButton = {
-            TextButton(enabled = newTitle.isNotBlank(), onClick = { onSave(newTitle, newArtist) }) {
+            TextButton(enabled = newTitle.isNotBlank(), onClick = { onSave(newTitle, newArtist, newAlbum) }) {
                 Text(stringResource(R.string.playlist_save), color = Green)
             }
         },
@@ -471,8 +477,8 @@ fun EditLocalTrackDialog(title: String, artist: String, onDismiss: () -> Unit, o
 /** [EditLocalTrackDialog] for a stored local row: the edit lands through LocalMetadata. */
 @Composable
 fun EditLocalItemDialog(item: LocalItem, onDismiss: () -> Unit) {
-    EditLocalTrackDialog(item.title, item.artist, onDismiss) { title, artist ->
-        com.music.spotui.data.local.LocalMetadata.edit(item.uri, title, artist)
+    EditLocalTrackDialog(item.title, item.artist, item.album, onDismiss) { title, artist, album ->
+        com.music.spotui.data.local.LocalMetadata.edit(item.uri, title, artist, album)
         com.music.spotui.data.local.LocalMusic.invalidate()
         onDismiss()
     }

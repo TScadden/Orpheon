@@ -64,10 +64,13 @@ object LocalLikes {
         }
     }
 
-    /** A title / artist edit (see [LocalMetadata]) reaches the liked rows of that file too. */
-    fun applyMetadata(uri: String, title: String, artist: String) = update {
+    /** A title / artist / album edit (see [LocalMetadata]) reaches the liked rows of that file too. */
+    fun applyMetadata(uri: String, title: String, artist: String, album: String = "") = update {
         val at = items.indexOfFirst { it.uri == uri }
-        if (at >= 0) items[at] = items[at].copy(title = title, artist = artist)
+        if (at >= 0) items[at] = items[at].copy(
+            title = title, artist = artist,
+            album = if (album.isNotBlank()) album else items[at].album,
+        )
     }
 
     private fun update(change: () -> Unit) {
