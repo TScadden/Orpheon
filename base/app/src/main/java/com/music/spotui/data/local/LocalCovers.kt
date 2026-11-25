@@ -14,9 +14,11 @@ import java.util.concurrent.ConcurrentHashMap
  * Cover pictures the user gave phone files and their albums inside the app: a song's
  * own cover, and an album's cover shared by the album's files. The pictures are copied
  * into the app's files (track_covers/ and album_covers/, through [PlaylistCovers], the
- * playlist-cover machinery); this store keeps their paths, keyed like [LocalMetadata] —
- * a song cover by the file's uri, an album cover by artist + album (an album's name
- * alone collides across artists).
+ * playlist-cover machinery); this store keeps their paths — a song cover by the file's
+ * uri, an album cover by the album's name alone (local albums group by name alone
+ * since v9, so their covers key the same way). Covers stored before v9 sit under a
+ * legacy artist + album key; lookups fall back to those (see [albumCover]) so a cover
+ * set on an old artist-split album page is never orphaned.
  *
  * Wherever a file's art shows, the chain is: the song's own cover → the file's own
  * MediaStore art → the album's cover → the file's art address as it was (whose failure
@@ -58,9 +60,16 @@ object LocalCovers {
         }
     }
 
-    /** The key an album's cover is stored under: artist and album, case/space-insensitive. */
-    internal fun albumKey(artist: String, album: String): String =
+    /** The key an album's cover is stored under: the album name alone, case/space-insensitive. */
+    internal fun albumKey(album: String): String = album.trim().lowercase()
+
+    /** The pre-v9 key: artist and album. Covers stored then are still found by fallback. */
+    internal fun legacyAlbumKey(artist: String, album: String): String =
         artist.trim().lowercase() + "\n" + album.trim().lowercase()
+
+    /** Stored legacy keys whose album part is [albumKey]'s value, sorted for a stable pick. */
+    private fun legacyKeysFor(normalizedAlbum: String): List<String> =
+        albumCovers.keys.filter { it.contains('\n') && it.substringAfterLast('\n') == normalizedAlbum }.sorted()
 
     /** Records whether MediaStore has art at [artUri] (the [LocalMusic] scan learns this). */
     fun noteArtPresence(artUri: String, exists: Boolean) {
@@ -76,10 +85,17 @@ object LocalCovers {
         return synchronized(lock) { songCovers[uri] }
     }
 
-    /** The album cover's path for [artist]'s [album], when the user set one. */
-    fun albumCover(artist: String, album: String): String? {
+    /**
+     * The album cover's path for [album], when the user set one. The name-only key
+     * wins; otherwise the first (sorted) pre-v9 artist + album key for this album
+     * answers, so a cover set before the grouping change still shows.
+     */
+    fun albumCover(album: String): String? {
         ensureLoaded()
-        return synchronized(lock) { albumCovers[albumKey(artist, album)] }
+        return synchronized(lock) {
+            val key = albumKey(album)
+            albumCovers[key] ?: legacyKeysFor(key).firstOrNull()?.let { albumCovers[it] }
+        }
     }
 
     /**
@@ -91,19 +107,19 @@ object LocalCovers {
         songCover ?: if (ownArtExists) ownArt else albumCover ?: ownArt
 
     /** The effective art address of the file at [uri] (display form: content:// or file://). */
-    fun effectiveArt(uri: String, artist: String, album: String, ownArt: String): String = chooseArt(
+    fun effectiveArt(uri: String, album: String, ownArt: String): String = chooseArt(
         songCover(uri)?.let { Uri.fromFile(File(it)).toString() },
         ownArt,
         ownArtExists(ownArt),
-        albumCover(artist, album)?.let { Uri.fromFile(File(it)).toString() },
+        albumCover(album)?.let { Uri.fromFile(File(it)).toString() },
     )
 
     /** The effective art address of a stored local row. */
-    fun effectiveArt(item: LocalItem): String = effectiveArt(item.uri, item.artist, item.album, item.artUri)
+    fun effectiveArt(item: LocalItem): String = effectiveArt(item.uri, item.album, item.artUri)
 
     /** [track] with its effective art. */
     fun apply(track: LocalTrack): LocalTrack {
-        val art = effectiveArt(track.uri.toString(), track.artist, track.album, track.artUri.toString())
+        val art = effectiveArt(track.uri.toString(), track.album, track.artUri.toString())
         return if (art == track.artUri.toString()) track else track.copy(artUri = Uri.parse(art))
     }
 
@@ -125,21 +141,40 @@ object LocalCovers {
         }
     }
 
-    /** Copies [image] in as the cover of [artist]'s [album]; the new path, or null when unusable. */
-    fun setAlbumCover(context: Context, artist: String, album: String, image: Uri): String? {
+    /**
+     * Copies [image] in as the cover of [album]; the new path, or null when unusable.
+     * Stored under the name-only key; any pre-v9 artist + album entries for this
+     * album are retired (their files deleted) so the new cover is the one cover.
+     */
+    fun setAlbumCover(context: Context, album: String, image: Uri): String? {
         val path = PlaylistCovers.saveTo(context, image, ALBUMS_FOLDER) ?: return null
-        val key = albumKey(artist, album)
-        val old = synchronized(lock) { ensureLoaded(); albumCovers.put(key, path).also { persist() } }
-        if (old != null && old != path) PlaylistCovers.delete(old)
+        val key = albumKey(album)
+        val retired = synchronized(lock) {
+            ensureLoaded()
+            val old = mutableListOf<String>()
+            albumCovers.put(key, path)?.let { old += it }
+            legacyKeysFor(key).forEach { albumCovers.remove(it)?.let { p -> old += p } }
+            persist()
+            old
+        }
+        retired.forEach { if (it != path) PlaylistCovers.delete(it) }
         LocalMusic.invalidate()
         return path
     }
 
-    /** Takes [artist]'s [album]'s cover away. */
-    fun clearAlbumCover(artist: String, album: String) {
-        val old = synchronized(lock) { ensureLoaded(); albumCovers.remove(albumKey(artist, album)).also { if (it != null) persist() } }
-        if (old != null) {
-            PlaylistCovers.delete(old)
+    /** Takes [album]'s cover away — the name-only entry and any pre-v9 ones for it. */
+    fun clearAlbumCover(album: String) {
+        val key = albumKey(album)
+        val removed = synchronized(lock) {
+            ensureLoaded()
+            val old = mutableListOf<String>()
+            albumCovers.remove(key)?.let { old += it }
+            legacyKeysFor(key).forEach { albumCovers.remove(it)?.let { p -> old += p } }
+            if (old.isNotEmpty()) persist()
+            old
+        }
+        if (removed.isNotEmpty()) {
+            removed.forEach { PlaylistCovers.delete(it) }
             LocalMusic.invalidate()
         }
     }
