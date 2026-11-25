@@ -143,7 +143,7 @@ data class ActionRequest(
  * and no event about them is ever sent to an extension (see [SurfaceGuard]).
  */
 enum class ProtectedSurface(val key: String) {
-    /** The owner's donation reminder and the Support sheets (Ko-fi, GitHub Sponsors). */
+    /** Reserved: the donation reminder and support sheets that used it were removed; the key stays so the surface set extensions know does not change. */
     SUPPORT("support"),
     /** "New version" card. */
     UPDATE("update"),

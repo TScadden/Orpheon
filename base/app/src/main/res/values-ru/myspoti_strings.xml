@@ -91,26 +91,7 @@
     <string name="local_playlist_empty">Добавляйте треки из локальных файлов кнопкой +.</string>
     <string name="download_kept_by_list">Остаётся скачанным: его держит скачанный плейлист</string>
     <string name="download_kept_by_named">Остаётся скачанным: «%1$s» скачан и содержит его</string>
-    <string name="support_title">Поддержать Scadify</string>
-    <string name="support_scan">Отсканируйте телефоном</string>
-    <string name="support_action">Поддержать на Ko-fi</string>
-    <string name="support_decline">Нет, спасибо</string>
-    <string name="support_row_detail">Небольшое пожертвование на Ko-fi или GitHub Sponsors помогает развивать приложение</string>
-    <string name="supporter_perks_title">Бонусы для поддержавших</string>
-    <string name="supporter_perks_detail">Цвет акцента, значок приложения и бейдж в знак благодарности</string>
-    <string name="supporter_perks_locked">Открывается, если вы поддержали Scadify. На честное слово: ничего не проверяется.</string>
-    <string name="supporter_i_supported">Я поддержал(а) Scadify</string>
-    <string name="supporter_how">Как вы поддержали?</string>
-    <string name="supporter_once">Пожертвование</string>
-    <string name="supporter_monthly">Каждый месяц</string>
-    <string name="supporter_badge">Поддержка</string>
-    <string name="supporter_thanks_title">Спасибо за поддержку!</string>
-    <string name="supporter_thanks_body">Если Scadify по-прежнему вам полезен, новое небольшое пожертвование поможет проекту жить дальше.</string>
-    <string name="support_again">Поддержать ещё раз</string>
     <string name="accent_colour">Цвет акцента</string>
-    <string name="supporter_icon">Значок приложения</string>
-    <string name="supporter_icon_note">При смене значка ярлык на главном экране может исчезнуть: приложение останется в списке приложений.</string>
-    <string name="supporter_monthly_switch">Я поддерживаю каждый месяц (без напоминаний)</string>
     <string name="color_green">Зелёный</string>
     <string name="color_blue">Синий</string>
     <string name="color_purple">Фиолетовый</string>
@@ -350,7 +331,6 @@
     <string name="settings_rotation_portrait">Портретная</string>
     <string name="settings_rotation_auto">Автоматически</string>
     <string name="settings_rotation_landscape">Альбомная</string>
-    <string name="support_github_action">Поддержать на GitHub</string>
     <string name="download_on_mobile_data">Загрузка по мобильной сети: расходуется ваш трафик</string>
 
     <!-- Podcast show page, episode page and podcast player -->
