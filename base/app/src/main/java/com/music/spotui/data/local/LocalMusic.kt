@@ -127,9 +127,14 @@ object LocalMusic {
         // The names the user gave files inside the app win over the files' tags,
         // and their covers win over the files' art.
         LocalMetadata.init(context)
-        val named = out.map { LocalCovers.apply(LocalMetadata.apply(it)) }
-        cache = named
-        named
+        val named = out.map { LocalMetadata.apply(it) }
+        // What each album lends its files that have no art of their own (the album
+        // page's header borrows the same art): learned before the covers are
+        // worked out, from the effective names.
+        LocalCovers.noteBorrowedArt(named)
+        val covered = named.map { LocalCovers.apply(it) }
+        cache = covered
+        covered
     }
 
     /** Forgets the read list: the next [tracks] reads the files again (a name was edited). */

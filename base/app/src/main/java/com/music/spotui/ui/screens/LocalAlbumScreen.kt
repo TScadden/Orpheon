@@ -160,7 +160,7 @@ fun LocalAlbumScreen(navController: NavController, artist: String, album: String
                 LazyColumn(contentPadding = PaddingValues(bottom = com.music.spotui.ui.components.bottomBarsSpace()), modifier = Modifier.fillMaxSize()) {
                     item(key = "cover") {
                         GlideImage(
-                            model = albumCover?.let { java.io.File(it) } ?: list.firstOrNull()?.artUri,
+                            model = albumCover?.let { java.io.File(it) } ?: LocalCovers.borrowedArt(album) ?: list.firstOrNull()?.artUri,
                             contentDescription = null, contentScale = ContentScale.Crop,
                             loading = placeholder(R.drawable.placeholder), failure = placeholder(R.drawable.local_files_cover),
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
