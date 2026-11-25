@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.rounded.Abc
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -113,7 +114,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.music.spotui.data.api.LyricsApi
 import com.music.spotui.data.entity.LyricLine
 import com.music.spotui.data.entity.Lyrics
+import com.music.spotui.data.preferences.LyricGlowPref
 import com.music.spotui.data.preferences.LyricsRomanizationPref
+import com.music.spotui.ui.immersive.lyrics.LyricGlowView
 import com.music.spotui.data.preferences.getLyricTranslateLang
 import com.music.spotui.data.preferences.isLyricsExtraSources
 import com.music.spotui.data.preferences.setLyricsExtraSources
@@ -572,6 +575,23 @@ fun LyricsScreen(
                 }
                 if (meaningOpen) com.music.spotui.ui.components.AboutSheet(m, palette.background) { meaningOpen = false }
             }
+            if (lyrics != null && lyrics.synced) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.size(48.dp).clip(CircleShape)
+                        .background(if (LyricGlowPref.classic) palette.highlight else Color.Transparent)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() }, indication = null,
+                        ) { LyricGlowPref.setClassic(context, !LyricGlowPref.classic) },
+                ) {
+                    Icon(
+                        Icons.Rounded.AutoAwesome,
+                        contentDescription = stringResource(R.string.lyric_glow),
+                        tint = if (LyricGlowPref.classic) palette.background else palette.highlight,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
             Box {
                 Box(
                     contentAlignment = Alignment.Center,
@@ -618,6 +638,19 @@ fun LyricsScreen(
                 noteOpen?.let { n -> if (m != null) com.music.spotui.ui.components.NoteSheet(m, n, palette.background) { noteOpen = null } }
                 // Translation is requested by onTranslate; do not upload lyrics on screen entry.
                 val active by remember(l) { derivedStateOf { activeIndexFor(l, position()) } }
+                // LyricGlow takes the screen over while it is on — synced words only: with no
+                // timings there is nothing for the sweep to follow, and the list stays.
+                if (LyricGlowPref.classic && l.synced && !selecting) {
+                    LyricGlowView(
+                        lyrics = l,
+                        trackKey = "${SongPlayer.nowPlaying.value.uri}|$title|$artist",
+                        title = title,
+                        artist = artist,
+                        fallbackAccent = palette.highlight,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 24.dp),
+                    )
+                } else {
                 // Other lyrics for the same song (Spotify's lines, then the word-timed ones; or the
                 // setting changed): the new ones fade in over the old, already on the line being
                 // sung, instead of the list jumping.
@@ -718,6 +751,7 @@ fun LyricsScreen(
                     onShare = { shareLyrics(context, title, artist, l.lines.getOrNull(active)?.text) },
                     modifier = Modifier.revealIn(reveal, 0.5f, 16f, span = 0.5f),
                 )
+                }
             }
         }
     }

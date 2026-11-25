@@ -62,6 +62,32 @@ object LyricsRomanizationPref {
     }
 }
 
+/**
+ * LyricGlow in the lyrics views: the full-screen three-line glow instead of the scrolling
+ * list, remembered per look (the two players' lyrics are separate places). Off by default;
+ * read as state by both looks, so the toggle and the view agree.
+ */
+object LyricGlowPref {
+    private const val KEY_IMMERSIVE = "lyric_glow_immersive"
+    private const val KEY_CLASSIC = "lyric_glow_classic"
+    var immersive by androidx.compose.runtime.mutableStateOf(
+        runCatching { prefs(com.music.spotui.di.Graph.app).getBoolean(KEY_IMMERSIVE, false) }.getOrDefault(false))
+        private set
+    var classic by androidx.compose.runtime.mutableStateOf(
+        runCatching { prefs(com.music.spotui.di.Graph.app).getBoolean(KEY_CLASSIC, false) }.getOrDefault(false))
+        private set
+
+    fun setImmersive(c: Context, value: Boolean) {
+        immersive = value
+        prefs(c).edit().putBoolean(KEY_IMMERSIVE, value).apply()
+    }
+
+    fun setClassic(c: Context, value: Boolean) {
+        classic = value
+        prefs(c).edit().putBoolean(KEY_CLASSIC, value).apply()
+    }
+}
+
 /** The bottom bar: fading into the list (the default), or solid black. Read by the bar as state. */
 object SolidNavBar {
     private const val KEY = "solid_nav_bar"
