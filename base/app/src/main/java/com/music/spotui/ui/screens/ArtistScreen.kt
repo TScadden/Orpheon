@@ -433,7 +433,7 @@ private fun ArtistOverviewContent(
                     item, index, artistViewModel,
                     saved = SongPlayer.library["spotify:track:${item.song.spotifyTrackId}"] ?: ("spotify:track:${item.song.spotifyTrackId}" in saved),
                     onToggleSaved = { on ->
-                        SongPlayer.setTrackSaved(item.song.spotifyTrackId, on)
+                        SongPlayer.setTrackSaved(item.song.spotifyTrackId, on, item.song)
                     },
                     onMore = { menuSong = item.song },
                     onPlay = { playTrackAt(index) },

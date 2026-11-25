@@ -601,7 +601,7 @@ fun SearchSongRow(
 
 com.music.spotui.ui.screens.AddButton(song = { song }, liked = isLiked, size = 22.dp) {
                     // Spotify library, per track (not the now-playing like state).
-                    com.music.spotui.di.SongPlayer.setTrackSaved(song.spotifyTrackId, true)
+                    com.music.spotui.di.SongPlayer.setTrackSaved(song.spotifyTrackId, true, song)
         }
     }
 }

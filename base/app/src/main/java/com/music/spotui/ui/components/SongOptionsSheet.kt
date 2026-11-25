@@ -181,7 +181,7 @@ fun SongOptionsSheet(
                 enabled = hasId,
                 leading = if (liked) ({ LikedBadge() }) else null,
             ) {
-                SongPlayer.setTrackSaved(song.spotifyTrackId, !liked)
+                SongPlayer.setTrackSaved(song.spotifyTrackId, !liked, song)
                 toast(context.getString(if (liked) R.string.lbl_unliked else R.string.lbl_liked))
                 onDismiss()
             }

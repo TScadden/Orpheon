@@ -2143,7 +2143,33 @@ object SongPlayer {
         Haptics.toggle(on)
         val uri = currentLikeUri().ifBlank { if (currentTrackId.isNotBlank()) SPOTIFY_TRACK_PREFIX + currentTrackId else "" }
         if (uri.isBlank()) { boundState?.likeState?.value = on; app.myspoti.host.android.Logbook.log("library: like not sent, no song id"); return }
+        // A catalog song (a Spotify id, from the catalog or an extension's stream): its
+        // like lives on this phone too (CatalogLikes), as a device file's does — the
+        // platform's account library keeps nothing, and the tap only produced the
+        // "Could not update your library" toast (reported on a Melzo-played song).
+        if (uri.startsWith(SPOTIFY_TRACK_PREFIX) && com.music.spotui.data.local.CatalogLikes.localOnly) {
+            val id = trackIdOf(uri)
+            if (on) currentCatalogLike(id)?.let { com.music.spotui.data.local.CatalogLikes.set(it, true) }
+            else com.music.spotui.data.local.CatalogLikes.remove(id)
+            boundState?.likeState?.value = on
+            onLibraryItem(uri, on)
+            likedChanges.value++
+            app.myspoti.host.android.Logbook.log("library: $uri ${if (on) "liked" else "unliked"} on this phone (catalog)")
+            return
+        }
         setSaved(uri, on)
+    }
+
+    /** The song shown, as a [com.music.spotui.data.local.CatalogLike] snapshot: its queue entry when that is the song asked about, else the player's own state. */
+    private fun currentCatalogLike(trackId: String): com.music.spotui.data.local.CatalogLike? {
+        _queue.value.current?.takeIf { it.spotifyTrackId == trackId }?.let { s ->
+            return com.music.spotui.data.local.CatalogLike(s.spotifyTrackId, s.title, s.singer, s.album, s.coverUri, s.durationMs.toLong(), s.url)
+        }
+        val st = boundState ?: return null
+        if (currentTrackId != trackId) return null
+        val title = st.title.value
+        return com.music.spotui.data.local.CatalogLike(trackId, title, st.singer.value, st.album.value, st.coverUri.value,
+            durationMs, buildSpotifyPlayQuery(trackId, title, st.singer.value))
     }
 
     // ── Library state (Liked Songs, saved albums / playlists, followed artists) ──
@@ -2287,7 +2313,13 @@ object SongPlayer {
         val out = known.filterTo(mutableSetOf()) { library[it] == true }
         if (unknown.isEmpty()) return LibraryCheck(out, emptySet(), false)
         val flags = savedFlags(unknown) ?: return LibraryCheck(out, emptySet(), true)
-        val saved = unknown.filterIndexed { i, _ -> flags.getOrNull(i) == true }.toSet()
+        // A catalog song liked on this phone (CatalogLikes) is saved whatever the
+        // platform's library answers — it keeps nothing, so its answer is always no.
+        val saved = unknown.filterIndexed { i, _ -> flags.getOrNull(i) == true }.toSet() +
+            unknown.filter {
+                it.startsWith(SPOTIFY_TRACK_PREFIX) && com.music.spotui.data.local.CatalogLikes.localOnly &&
+                    com.music.spotui.data.local.CatalogLikes.isLiked(trackIdOf(it))
+            }
         main.post {
             for (u in unknown) {
                 if (u == intentUri && SystemClock.elapsedRealtime() < intentUntil) continue
@@ -2331,10 +2363,27 @@ object SongPlayer {
     /** Every like / unlike of a track the moment it is tapped (and its undo): track id, liked. */
     val likedTaps = kotlinx.coroutines.flow.MutableSharedFlow<Pair<String, Boolean>>(extraBufferCapacity = 16)
 
-    /** Like / unlike a track by id. */
-    fun setTrackSaved(trackId: String, on: Boolean) {
+    /** Like / unlike a track by id. [song]: the row the tap came from, when the caller has it (the snapshot a like kept on this phone needs). */
+    fun setTrackSaved(trackId: String, on: Boolean, song: SongsModel? = null) {
         if (trackId.isBlank()) return
         Haptics.toggle(on)
+        // A catalog song's like lives on this phone (CatalogLikes): the platform has no
+        // account library to keep it, and sending it there only failed the tap with the
+        // "Could not update your library" toast.
+        if (com.music.spotui.data.local.CatalogLikes.localOnly) {
+            if (on) {
+                val s = song?.takeIf { it.spotifyTrackId == trackId }
+                val like = s?.let {
+                    com.music.spotui.data.local.CatalogLike(it.spotifyTrackId, it.title, it.singer, it.album, it.coverUri, it.durationMs.toLong(), it.url)
+                } ?: com.music.spotui.data.local.CatalogLikes.like(trackId)
+                    ?: com.music.spotui.data.local.CatalogLike(trackId, "", "", "", "", 0L, "")
+                com.music.spotui.data.local.CatalogLikes.set(like, true)
+            } else com.music.spotui.data.local.CatalogLikes.remove(trackId)
+            onLibraryItem(SPOTIFY_TRACK_PREFIX + trackId, on)
+            likedTaps.tryEmit(trackId to on)
+            likedChanges.value++
+            return
+        }
         setSaved(SPOTIFY_TRACK_PREFIX + trackId, on)
     }
 

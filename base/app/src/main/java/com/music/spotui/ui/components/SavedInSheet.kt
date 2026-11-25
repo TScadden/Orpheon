@@ -207,7 +207,7 @@ fun SavedInSheet(
                     }
                 },
             ) {
-                com.music.spotui.di.SongPlayer.setTrackSaved(song.spotifyTrackId, !liked)
+                com.music.spotui.di.SongPlayer.setTrackSaved(song.spotifyTrackId, !liked, song)
                 onLikedChanged(!liked)
             }
 
