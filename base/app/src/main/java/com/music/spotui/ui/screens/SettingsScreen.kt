@@ -73,6 +73,11 @@ fun SettingsScreen(navController: NavController) {
     var passReceive by remember { mutableStateOf(false) }
     if (passSend) com.music.spotui.pass.PassSendFlow { passSend = false }
     if (passReceive) com.music.spotui.pass.PassReceiveDialog { passReceive = false }
+    var shareReceive by remember { mutableStateOf(false) }
+    if (shareReceive) com.music.spotui.share.ShareReceiveFlow(
+        onDismiss = { shareReceive = false },
+        onImported = { shareReceive = false },
+    )
     // A page inside Settings (Transitions and AutoMix's options): its own screen, back returns to the tab.
     var sub by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     androidx.activity.compose.BackHandler(enabled = sub != null) { sub = null }
@@ -496,6 +501,13 @@ fun SettingsScreen(navController: NavController) {
             Column(Modifier.fillMaxWidth().clickable { passReceive = true }.padding(horizontal = 20.dp, vertical = 12.dp)) {
                 Text(stringResource(R.string.pass_receive), color = AppText, fontSize = 16.sp)
                 Text(stringResource(R.string.pass_receive_detail), color = AppMuted, fontSize = 12.sp)
+            }
+            Column(Modifier.fillMaxWidth().clickable {
+                if (com.music.spotui.share.ShareImport.supported) shareReceive = true
+                else android.widget.Toast.makeText(ctx, ctx.getString(R.string.share_receive_needs_newer_android), android.widget.Toast.LENGTH_LONG).show()
+            }.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                Text(stringResource(R.string.share_receive), color = AppText, fontSize = 16.sp)
+                Text(stringResource(R.string.share_receive_detail), color = AppMuted, fontSize = 12.sp)
             }
             }
             // Clear of the mini player and the navigation bar, as every other page (96 dp left the

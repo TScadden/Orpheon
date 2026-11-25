@@ -32,8 +32,14 @@ object PassCrypto {
     /** What the sender posts: its public key, the nonce and the ciphertext. */
     class Sealed(val senderKey: ByteArray, val nonce: ByteArray, val box: ByteArray)
 
-    fun seal(receiverKey: ByteArray, token: ByteArray, plain: ByteArray): Sealed {
-        val mine = keyPair()
+    fun seal(receiverKey: ByteArray, token: ByteArray, plain: ByteArray): Sealed = sealWith(keyPair(), receiverKey, token, plain)
+
+    /**
+     * [seal] with a key of the caller's own, kept: a conversation of many boxes each way
+     * (the playlist share) seals every one with the same pair, so the other side opens
+     * them all with the key the first box carried.
+     */
+    fun sealWith(mine: KeyPair, receiverKey: ByteArray, token: ByteArray, plain: ByteArray): Sealed {
         val key = derive(mine, publicKey(receiverKey), token)
         val nonce = randomBytes(12)
         val c = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, nonce)); updateAAD(token) }

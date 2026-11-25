@@ -124,6 +124,16 @@
                     android:scheme="orpheon"
                     android:host="pass" />
             </intent-filter>
+            <!-- The share QR code of another phone (ShareInvite, ShareLinks): the camera opens it
+                 here, on the question; nothing is received without the user's yes. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="orpheon"
+                    android:host="share" />
+            </intent-filter>
             <!-- The pass codes of before (orpheon-pass:1?…, the desktop app's until it shows the link
                  above): opened the same way where a scanner offers it. -->
             <intent-filter>

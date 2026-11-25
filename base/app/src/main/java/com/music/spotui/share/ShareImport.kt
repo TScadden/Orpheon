@@ -54,6 +54,11 @@ object ShareImport {
         val manifest = runCatching {
             context.contentResolver.openInputStream(uri)?.use { ShareZip.readManifest(it) }
         }.getOrNull() ?: return@withContext null
+        previewManifest(context, manifest)
+    }
+
+    /** The confirm screen's facts for a manifest that arrived another way (the same-Wi-Fi share reads it off the wire). */
+    suspend fun previewManifest(context: Context, manifest: ShareManifest): Preview = withContext(Dispatchers.IO) {
         val owned = SharePlan.ownedCount(manifest, LocalMusic.tracks(context))
         Preview(manifest, owned, StatFs(context.filesDir.path).availableBytes)
     }
@@ -109,6 +114,62 @@ object ShareImport {
             coverTemp?.delete()
             return@withContext Result(null, 0, manifest.tracks.size, failed, cancelled = true)
         }
+        finishImport(context, manifest, bound, arrived, coverTemp)
+    }
+
+    /**
+     * The same-Wi-Fi share's landing: every song the plan said to fetch already sits in a
+     * temp file, checked against the manifest's size and hash by the transfer that
+     * brought it. From here the road is the file share's own — bind what the phone owns,
+     * write the rest into MediaStore, make the playlist.
+     */
+    suspend fun importFiles(
+        context: Context,
+        manifest: ShareManifest,
+        files: Map<String, File>,
+        coverFile: File?,
+        cancelled: AtomicBoolean,
+        onProgress: (done: Int, total: Int, name: String) -> Unit,
+    ): Result = withContext(Dispatchers.IO) {
+        val decisions = SharePlan.decide(manifest, LocalMusic.tracks(context))
+        val byEntry = decisions.associateBy { d -> when (d) { is ShareDecision.Bind -> d.track.entry; is ShareDecision.Fetch -> d.track.entry } }
+        val bound = HashMap<String, LocalTrack>()
+        val toFetch = ArrayList<ShareTrack>()
+        manifest.tracks.forEach { t ->
+            when (val d = byEntry[t.entry]) {
+                is ShareDecision.Bind -> bound[t.entry] = d.existing
+                is ShareDecision.Fetch -> toFetch += d.track
+                null -> Unit
+            }
+        }
+        val arrived = HashMap<String, LocalTrack>()
+        val received = ArrayList<Uri>()
+        var failed = 0
+        var done = 0
+        for (track in toFetch) {
+            if (cancelled.get()) break
+            onProgress(done, toFetch.size, track.title)
+            val file = files[track.entry]
+            val got = file?.let { runCatching { it.inputStream().buffered().use { s -> writeSong(context, track, s, cancelled) } }.getOrNull() }
+            if (got != null) { arrived[track.entry] = got; received += got.uri } else failed++
+            done++
+            onProgress(done, toFetch.size, track.title)
+        }
+        if (cancelled.get()) {
+            discardUnreferenced(context, received)
+            return@withContext Result(null, 0, manifest.tracks.size, failed, cancelled = true)
+        }
+        finishImport(context, manifest, bound, arrived, coverFile)
+    }
+
+    /** What every road ends with: the playlist, its songs in the bundle's order, its cover. */
+    private fun finishImport(
+        context: Context,
+        manifest: ShareManifest,
+        bound: Map<String, LocalTrack>,
+        arrived: Map<String, LocalTrack>,
+        coverTemp: File?,
+    ): Result {
         val inOrder = manifest.tracks.mapNotNull { t -> bound[t.entry] ?: arrived[t.entry] }
         val playlist = LocalPlaylists.create(manifest.name.ifBlank { context.getString(app.myspoti.engine.R.string.import_default_name) })
         val add = LocalPlaylists.addAll(playlist.id, inOrder)
@@ -118,15 +179,17 @@ object ShareImport {
             tmp.delete()
         }
         LocalMusic.invalidate()
-        Result(playlist.id, add.added, manifest.tracks.size, manifest.tracks.size - add.added, cancelled = false)
+        return Result(playlist.id, add.added, manifest.tracks.size, manifest.tracks.size - add.added, cancelled = false)
     }
 
     /**
      * One song out of the bundle into MediaStore: a pending row, the bytes streamed in
      * while they are hashed, the manifest's size and hash as the gate, then published.
-     * Null when anything does not check out — the row goes with the failure.
+     * The stream is whatever carried the song — a zip entry, a temp file the network
+     * transfer filled; the gate is the same. Null when anything does not check out —
+     * the row goes with the failure.
      */
-    private fun writeSong(context: Context, track: ShareTrack, zip: ZipInputStream, cancelled: AtomicBoolean): LocalTrack? {
+    private fun writeSong(context: Context, track: ShareTrack, source: java.io.InputStream, cancelled: AtomicBoolean): LocalTrack? {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.Audio.Media.DISPLAY_NAME, track.fileName)
@@ -148,7 +211,7 @@ object ShareImport {
                 val buf = ByteArray(64 * 1024)
                 while (true) {
                     if (cancelled.get()) throw InterruptedException("import cancelled")
-                    val n = zip.read(buf)
+                    val n = source.read(buf)
                     if (n < 0) break
                     out.write(buf, 0, n)
                     digest.update(buf, 0, n)

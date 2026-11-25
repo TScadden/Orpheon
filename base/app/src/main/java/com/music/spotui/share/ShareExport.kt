@@ -23,9 +23,17 @@ import java.io.FileOutputStream
 object ShareExport {
     data class Built(val file: File, val manifest: ShareManifest, val skipped: Int)
 
-    suspend fun build(context: Context, playlist: LocalPlaylist): Built = withContext(Dispatchers.IO) {
-        val dir = File(context.cacheDir, "shared/playlist").apply { mkdirs() }
-        dir.listFiles()?.forEach { it.delete() }
+    /**
+     * A playlist readied for sharing, before any transport touches it: the manifest and
+     * every entry's bytes on call. The file share packs this into a zip; the same-Wi-Fi
+     * share serves the very same entries off it — one plan, two ways out the door.
+     */
+    data class Packed(val manifest: ShareManifest, val entries: List<ShareZip.Entry>, val skipped: Int) {
+        /** An entry's bytes by its manifest name (a song, or the cover), or null when it is not in the pack. */
+        fun entry(name: String): ShareZip.Entry? = entries.firstOrNull { it.name == name }
+    }
+
+    suspend fun pack(context: Context, playlist: LocalPlaylist): Packed = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
         val tracks = ArrayList<ShareTrack>()
         val entries = ArrayList<ShareZip.Entry>()
@@ -66,9 +74,16 @@ object ShareExport {
         }
         if (coverFile != null) all += ShareZip.Entry(ShareZip.COVER_ENTRY, stored = false) { FileInputStream(coverFile) }
         all += entries
+        Packed(manifest, all, skipped)
+    }
+
+    suspend fun build(context: Context, playlist: LocalPlaylist): Built = withContext(Dispatchers.IO) {
+        val dir = File(context.cacheDir, "shared/playlist").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        val packed = pack(context, playlist)
         val out = File(dir, safeFileName(playlist.name) + ShareZip.EXTENSION)
-        FileOutputStream(out).use { ShareZip.write(all, it) }
-        Built(out, manifest, skipped)
+        FileOutputStream(out).use { ShareZip.write(packed.entries, it) }
+        Built(out, packed.manifest, packed.skipped)
     }
 
     /** Hands the built file to the system share sheet (Drive, Quick Share, …). */

@@ -48,6 +48,7 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.QrCode2
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Group
@@ -258,6 +259,14 @@ fun LibraryCreateSheet(navController: NavController, onDismiss: () -> Unit, onLi
             onImported = { id -> shareFile = null; onDismiss(); navController.navigate(localPlaylistRoute(id)) },
         )
     }
+    // A playlist shared by QR code on this Wi-Fi: scanned here, received through the share flow.
+    var shareReceive by remember { mutableStateOf(false) }
+    if (shareReceive) {
+        com.music.spotui.share.ShareReceiveFlow(
+            onDismiss = { shareReceive = false },
+            onImported = { id -> shareReceive = false; onDismiss(); navController.navigate(localPlaylistRoute(id)) },
+        )
+    }
     when (asking) {
         "playlist" -> NameDialog(stringResource(R.string.lbl_playlist_create), context.getString(R.string.my_playlist),
             stringResource(R.string.lbl_create), onDismiss = onDismiss) { name ->
@@ -290,6 +299,13 @@ fun LibraryCreateSheet(navController: NavController, onDismiss: () -> Unit, onLi
                         pickShareFile.launch(arrayOf(com.music.spotui.share.ShareZip.MIME, "application/zip", "application/x-zip-compressed"))
                     } else {
                         Toast.makeText(context, context.getString(R.string.share_needs_newer_android), Toast.LENGTH_LONG).show()
+                    }
+                }
+                SheetRow(Icons.Outlined.QrCode2, stringResource(R.string.share_receive), stringResource(R.string.share_receive_detail)) {
+                    if (com.music.spotui.share.ShareImport.supported) {
+                        shareReceive = true
+                    } else {
+                        Toast.makeText(context, context.getString(R.string.share_receive_needs_newer_android), Toast.LENGTH_LONG).show()
                     }
                 }
             }

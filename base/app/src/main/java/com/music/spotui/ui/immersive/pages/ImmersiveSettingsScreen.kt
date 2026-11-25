@@ -1122,6 +1122,11 @@ private fun AccountsPage(back: () -> Unit) {
     var passReceive by remember { mutableStateOf(false) }
     if (passSend) com.music.spotui.pass.PassSendFlow { passSend = false }
     if (passReceive) com.music.spotui.pass.PassReceiveDialog { passReceive = false }
+    var shareReceive by remember { mutableStateOf(false) }
+    if (shareReceive) com.music.spotui.share.ShareReceiveFlow(
+        onDismiss = { shareReceive = false },
+        onImported = { shareReceive = false },
+    )
     val isTv = remember { ctx.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK) }
     ImmersivePage(title = stringResource(R.string.accounts_title), onBack = back) {
         // The account provider: where extension plays are counted and the library is read from (one at a time).
@@ -1151,6 +1156,12 @@ private fun AccountsPage(back: () -> Unit) {
             // A TV has no camera: it only receives.
             if (!isTv) row { ImmersiveGroupRow(stringResource(R.string.pass_send), detail = stringResource(R.string.pass_send_detail), chevron = true, onClick = { passSend = true }) }
             row { ImmersiveGroupRow(stringResource(R.string.pass_receive), detail = stringResource(R.string.pass_receive_detail), chevron = true, onClick = { passReceive = true }) }
+            if (!isTv) row {
+                ImmersiveGroupRow(stringResource(R.string.share_receive), detail = stringResource(R.string.share_receive_detail), chevron = true, onClick = {
+                    if (com.music.spotui.share.ShareImport.supported) shareReceive = true
+                    else android.widget.Toast.makeText(ctx, ctx.getString(R.string.share_receive_needs_newer_android), android.widget.Toast.LENGTH_LONG).show()
+                })
+            }
         }
     }
 }
