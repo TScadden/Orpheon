@@ -204,4 +204,63 @@ class HookDispatchTest {
     @Test fun withinGivesNullWhenNobodyAnswers() = runTest {
         assertNull(HookDispatch.firstInOrderWithin(listOf(1, 2), graceMs = 10) { null })
     }
+
+    // ── Fitting: an answer of the wrong length is passed over (Scadify v12) ──
+
+    /** An answer's announced length in ms; null announces none and is taken as it comes. */
+    private data class Ans(val durationMs: Long?)
+
+    private val want = 200_000L
+    private val fits = { a: Ans -> a.durationMs == null || kotlin.math.abs(a.durationMs - want) <= 10_000 }
+    private val distance = { a: Ans -> a.durationMs?.let { kotlin.math.abs(it - want) } ?: Long.MAX_VALUE }
+
+    @Test fun aMismatchingAnswerIsPassedOverForTheNextSource() = runTest {
+        val r = HookDispatch.firstFittingInOrderWithin(listOf("a", "b"), graceMs = 100, fits, distance) { c ->
+            if (c == "a") Ans(95_000) else Ans(200_000)
+        }
+        assertEquals("b" to Ans(200_000), r)
+    }
+
+    @Test fun aMismatchAboveDoesNotSettleTheRace() = runTest {
+        // The one above answers at once with another version; the fitting one below is awaited.
+        val r = HookDispatch.firstFittingInOrderWithin(listOf("a", "b"), graceMs = 100, fits, distance) { c ->
+            if (c == "a") Ans(95_000) else { delay(300); Ans(205_000) }
+        }
+        assertEquals("b" to Ans(205_000), r)
+    }
+
+    @Test fun whenEveryAnswerMismatchesTheClosestPlays() = runTest {
+        val r = HookDispatch.firstFittingInOrderWithin(listOf("a", "b"), graceMs = 100, fits, distance) { c ->
+            if (c == "a") Ans(100_000) else Ans(320_000)
+        }
+        assertEquals("a" to Ans(100_000), r)
+        // Equally far: the earlier source wins.
+        val tie = HookDispatch.firstFittingInOrderWithin(listOf("a", "b"), graceMs = 100, fits, distance) { c ->
+            if (c == "a") Ans(150_000) else Ans(250_000)
+        }
+        assertEquals("a" to Ans(150_000), tie)
+        // Nobody answered at all: still null, never a dead invention.
+        assertNull(HookDispatch.firstFittingInOrderWithin(listOf("a"), graceMs = 100, fits, distance) { null })
+    }
+
+    @Test fun anAnswerAnnouncingNoLengthIsTakenAsItComes() = runTest {
+        // As before the check existed: the first answer in order wins, announced length or none.
+        val r = HookDispatch.firstFittingInOrderWithin(listOf("a", "b"), graceMs = 100, fits, distance) { c ->
+            if (c == "a") Ans(null) else Ans(200_000)
+        }
+        assertEquals("a" to Ans(null), r)
+    }
+
+    @Test fun aMatchingAnswerBehavesAsBefore() = runTest {
+        // Both fit: the order decides, a slower one above within its grace included.
+        val r = HookDispatch.firstFittingInOrderWithin(listOf("a", "b"), graceMs = 1_000, fits, distance) { c ->
+            if (c == "a") { delay(80); Ans(198_000) } else Ans(200_000)
+        }
+        assertEquals("a" to Ans(198_000), r)
+        // A failure above a fitting answer is skipped at once.
+        val skipped = HookDispatch.firstFittingInOrderWithin(listOf("a", "b"), graceMs = 100, fits, distance) { c ->
+            if (c == "a") null else Ans(200_000)
+        }
+        assertEquals("b" to Ans(200_000), skipped)
+    }
 }

@@ -24,6 +24,40 @@ class LocalCoversTest {
         assertEquals("content://art/1", LocalCovers.chooseArt(null, "content://art/1", ownArtExists = false, albumCover = null))
     }
 
+    @Test fun lentArtStandsInOnlyBelowASetAlbumCover() {
+        // The chain with lending (v12): song cover → own art → set album cover → lent art → own address.
+        assertEquals("song.jpg", LocalCovers.chooseArt("song.jpg", "content://art/1", ownArtExists = false, albumCover = "album.jpg", borrowedArt = "content://art/2"))
+        assertEquals("content://art/1", LocalCovers.chooseArt(null, "content://art/1", ownArtExists = true, albumCover = "album.jpg", borrowedArt = "content://art/2"))
+        assertEquals("album.jpg", LocalCovers.chooseArt(null, "content://art/1", ownArtExists = false, albumCover = "album.jpg", borrowedArt = "content://art/2"))
+        assertEquals("content://art/2", LocalCovers.chooseArt(null, "content://art/1", ownArtExists = false, albumCover = null, borrowedArt = "content://art/2"))
+        assertEquals("content://art/1", LocalCovers.chooseArt(null, "content://art/1", ownArtExists = false, albumCover = null, borrowedArt = null))
+    }
+
+    @Test fun anAlbumLendsTheArtOfItsFirstFileThatHasAny() {
+        val rows = listOf(
+            Triple("Laroi Unreleased", "content://art/1", false),
+            Triple("Laroi Unreleased", "content://art/2", true),
+            Triple("Laroi Unreleased", "content://art/3", true),
+            Triple("Other Album", "content://art/9", false),
+        )
+        val lent = LocalCovers.borrowedArt(rows)
+        // The artless first file lends nothing; the second file's art is the album's.
+        assertEquals("content://art/2", lent[LocalCovers.albumKey("Laroi Unreleased")])
+        // An album whose files all lack art lends nothing.
+        assertEquals(null, lent[LocalCovers.albumKey("Other Album")])
+    }
+
+    @Test fun lendingIgnoresCaseAndSpacesAndSkipsNamelessAlbums() {
+        val rows = listOf(
+            Triple("", "content://art/1", true),
+            Triple("  ", "content://art/2", true),
+            Triple("Greatest Hits", "content://art/3", true),
+            Triple("greatest hits ", "content://art/4", true),
+        )
+        val lent = LocalCovers.borrowedArt(rows)
+        assertEquals(mapOf(LocalCovers.albumKey("Greatest Hits") to "content://art/3"), lent)
+    }
+
     @Test fun albumKeysAreTheNameAloneIgnoringCaseAndSpaces() {
         assertEquals(LocalCovers.albumKey("A Place To Go"), LocalCovers.albumKey(" a place to go "))
         // The legacy key still carries the artist, so stored pre-v9 covers parse apart.

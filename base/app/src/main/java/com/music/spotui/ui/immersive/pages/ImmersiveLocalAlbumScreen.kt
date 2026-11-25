@@ -111,7 +111,7 @@ fun ImmersiveLocalAlbumScreen(navController: NavController, artist: String, albu
         item(key = "cover") {
             Box(Modifier.fillMaxWidth().padding(horizontal = Immersive.Gutter, vertical = 8.dp), contentAlignment = Alignment.Center) {
                 ImmersiveCover(
-                    albumCover?.let { java.io.File(it).toURI().toString() } ?: list.firstOrNull()?.artUri?.toString(),
+                    albumCover?.let { java.io.File(it).toURI().toString() } ?: LocalCovers.borrowedArt(album) ?: list.firstOrNull()?.artUri?.toString(),
                     Modifier.fillMaxWidth(0.62f).aspectRatio(1f),
                     Immersive.CoverLarge,
                 )

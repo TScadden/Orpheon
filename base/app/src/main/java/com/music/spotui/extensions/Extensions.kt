@@ -897,9 +897,17 @@ object Extensions {
         val t0 = System.currentTimeMillis()
         val answers = ConcurrentHashMap<String, PlayAttempt.Ask>()
         // All asked at once; a slow source above one that answered is waited for briefly, not to its limit.
-        val found = HookDispatch.firstInOrderWithin(asked, AUDIO_GRACE_MS) { (id, rt) ->
+        // An answer announcing another version's length (the downloads' own check, [versionMismatch])
+        // is passed over for the sources below it — it is not a miss, the source may hold the right
+        // version of other songs; if every answer is another version, the closest one plays.
+        val found = HookDispatch.firstFittingInOrderWithin(asked, AUDIO_GRACE_MS,
+            fits = { s -> versionMismatch(s, withIsrc) == null },
+            distance = { s -> s.durationMs?.let { kotlin.math.abs(it - withIsrc.durationMs) } ?: Long.MAX_VALUE },
+        ) { (id, rt) ->
             val a = ask(id, rt, Hook.AUDIO_SOURCE, input, timeoutMs, AudioStream::parse)
-            answers[id] = PlayAttempt.Ask(id, a.outcome.key, a.ms, detail = a.outcome.detail)
+            val mismatch = a.value?.let { versionMismatch(it, withIsrc) }
+            if (mismatch != null) Logbook.log("audio: $id answered $label with another version ($mismatch)")
+            answers[id] = PlayAttempt.Ask(id, a.outcome.key, a.ms, detail = listOfNotNull(a.outcome.detail, mismatch?.let { "answered with another version: $it" }).joinToString("; ").ifBlank { null })
             a.value
         }
         val ms = System.currentTimeMillis() - t0
@@ -912,10 +920,14 @@ object Extensions {
         }
         misses.forget(track.id)
         val (c, a) = found
+        // The chosen answer is itself another version: every source answered with one, and the
+        // closest plays rather than nothing (the dispatch's fallback) — noted, never a miss.
+        val closest = versionMismatch(a, withIsrc)?.let { "every source answered with another version; the closest plays ($it)" }
+        if (closest != null) Logbook.log("audio: $closest, for $label")
         log(c.first, "audio for ${track.title} ($ms ms)")
         did(Area.AUDIO, c.first, "Audio of ${track.title} from ${c.second.manifest.name}")
         val own = qualityLine(c.first, app.myspoti.extensions.SettingSection.PLAYBACK)
-        attempts.update(attempt) { it.copy(asked = all, chosen = c.first, announced = a.qualityLabel(), sourceQuality = own) }
+        attempts.update(attempt) { it.copy(asked = all, chosen = c.first, announced = a.qualityLabel(), sourceQuality = own, fallback = closest ?: it.fallback) }
         return a.copy(providerId = c.first)
     }
 
@@ -1623,3 +1635,12 @@ object Extensions {
     /** [id]'s storage as stored (key → JSON text), for the command line's masked view. */
     internal fun storageValues(id: String): Map<String, String> = storeOf(id).all()
 }
+
+/**
+ * Why [stream]'s announced length is not [track]'s song, or null when it is the song — the
+ * downloads' own check ([com.music.spotui.data.offline.OfflineDownloader.lengthMismatch], its
+ * tolerances and its words), so a preview or another cut is refused the same way in both.
+ * An answer announcing no length says nothing either way: null, taken as it comes, as before.
+ */
+internal fun versionMismatch(stream: AudioStream, track: TrackInfo): String? =
+    stream.durationMs?.let { com.music.spotui.data.offline.OfflineDownloader.lengthMismatch(it / 1000, track.durationMs) }
