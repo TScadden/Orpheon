@@ -55,12 +55,15 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-      - name: Debug APK
+      - name: APKs
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         # Scadify's shipped build is the "clean" variant (-Pclean: the app.orpheon.beta.clean
         # app labelled "Scadify"). Pass it explicitly: relying on the Gradle build cache to
         # hand back clean outputs (as happened through v13) is luck, not a build.
-        run: ./gradlew assembleDebug -Pclean
+        # The phone ships its debug build; the watch ships its RELEASE build (v18: signed
+        # with the same committed keystore — see base/wear/build.gradle.kts), so :wear's
+        # release is assembled alongside and the artifact below takes it, not the debug APK.
+        run: ./gradlew assembleDebug :wear:assembleRelease -Pclean
 
       - uses: actions/upload-artifact@v7
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
@@ -68,7 +71,7 @@ jobs:
           name: myspoti-debug
           path: |
             base/app/build/outputs/apk/debug/*.apk
-            base/wear/build/outputs/apk/debug/*.apk
+            base/wear/build/outputs/apk/release/*.apk
           retention-days: 14
 
   release:

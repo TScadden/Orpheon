@@ -2,6 +2,7 @@
 
 package app.myspoti.wear
 
+import android.content.Context
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.focusable
@@ -59,6 +60,7 @@ import com.google.android.horologist.media.ui.material3.components.background.Ra
 import com.google.android.horologist.media.ui.material3.components.display.MessageMediaDisplay
 import com.google.android.horologist.media.ui.material3.screens.player.PlayerScreen
 import com.google.android.horologist.media.ui.state.model.TrackPositionUiModel
+import coil.request.ImageRequest
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -102,7 +104,7 @@ internal fun WatchPager(
     extensionsNote: String,
     onSyncExtensions: () -> Unit,
     initialPage: Int = 0,
-    artwork: Paintable? = playing?.cover?.let { remember(it) { CoilPaintable(it) } },
+    artwork: Paintable? = rememberWatchArtwork(playing?.cover),
     mode: WatchMode = WatchMode.WATCH,
     onModeChange: (WatchMode) -> Unit = {},
     updateAuto: Boolean = true,
@@ -341,6 +343,28 @@ internal fun WatchPlayer(
             },
         )
     }
+}
+
+/** The side the sleeve is asked at: the player's background never shows it larger than the watch's screen. */
+private const val WATCH_ARTWORK_PX = 400
+
+/**
+ * The song's sleeve as a Coil request capped at the watch's screen size (Scadify v18):
+ * a bare URL asks Coil for the picture at its own size — a sleeve of 1,000 px or more,
+ * decoded whole on the watch — while the background shows it at under 400 px across,
+ * dimmed. Display-side only: the same address, asked smaller.
+ */
+internal fun watchArtwork(context: Context, cover: String): Paintable = CoilPaintable(
+    ImageRequest.Builder(context)
+        .data(cover)
+        .size(WATCH_ARTWORK_PX, WATCH_ARTWORK_PX)
+        .build()
+)
+
+@Composable
+internal fun rememberWatchArtwork(cover: String?): Paintable? {
+    val context = LocalContext.current
+    return remember(cover, context) { cover?.let { watchArtwork(context, it) } }
 }
 
 /**
