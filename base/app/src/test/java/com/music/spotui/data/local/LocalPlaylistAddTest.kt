@@ -36,7 +36,8 @@ class LocalPlaylistAddTest {
         assertTrue(LocalPlaylists.addSong(p.id, song))
         val items = LocalPlaylists.playlists.getValue(p.id).items
         assertEquals(1, items.size)
-        assertEquals("myspoti-ext://track/ABC", items[0].uri)
+        // The stream address for the song (its metadata rides as query parameters).
+        assertTrue(items[0].uri.startsWith("myspoti-ext://track/ABC"))
         assertEquals("Song", items[0].title)
         // Once only, like a file.
         assertFalse(LocalPlaylists.addSong(p.id, song))
