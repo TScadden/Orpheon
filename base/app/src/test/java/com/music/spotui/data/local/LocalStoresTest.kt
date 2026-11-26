@@ -99,16 +99,17 @@ class LocalStoresTest {
             ImportedSong("", "BBB", "Two", "Artist B", "Other", 182_000L, "", "USS1Z2500002"),
             ImportedSong("", "CCC", "Three", "Artist C", "Third", 100_000L, "https://img/own", "USS1Z2500004"),
         ))
-        val isrcFilled = ImportedPlaylists.repair(p.id, mapOf(
+        val repaired = ImportedPlaylists.repair(p.id, mapOf(
             "AAA" to ImportedSong("", "AAA", "One", "Artist A", "Alb", 201_000L, "https://img/1", "USS1Z2500001"),
             "BBB" to ImportedSong("", "BBB", "Two", "Artist B", "Other (Deluxe)", 182_000L, "https://img/2", "USXXX2500099"),
             "CCC" to ImportedSong("", "CCC", "Three", "Artist C", "Third (Remaster)", 100_000L, "https://img/3", "USS1Z2500003"),
             "ZZZ" to ImportedSong("", "ZZZ", "Unknown", "Artist Z", "Nope", 90_000L, "https://img/z", "USS1Z2500099"),
         ))
-        // Only AAA gained an ISRC: BBB and CCC already carried their own (and keep them,
-        // with their own album names and CCC's own cover), and ZZZ is not a song of this
-        // playlist, so it is not added.
-        assertEquals(setOf("AAA"), isrcFilled)
+        // The pass reports every song it completed in any field: AAA (ISRC, cover and
+        // album) and BBB (its missing cover — its ISRC and album were already its own
+        // and stay). CCC was already complete and is untouched; ZZZ is not a song of
+        // this playlist, so it is not added.
+        assertEquals(setOf("AAA", "BBB"), repaired)
         val after = ImportedPlaylists.playlists.getValue(p.id)
         assertEquals(3, after.items.size)
         assertEquals(listOf("AAA", "BBB", "CCC"), after.items.map { it.spotifyTrackId })

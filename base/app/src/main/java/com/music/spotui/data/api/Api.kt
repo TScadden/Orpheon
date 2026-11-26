@@ -1035,9 +1035,9 @@ class Api constructor(
      * and without covers and album names the list reads as broken. The store kept the
      * playlist's source link, so when such a playlist is opened it is re-read once, in the
      * background, the same merged reading an import makes, and every field the stored
-     * songs lack is filled from it (ImportedPlaylists.repair). A song that gains its ISRC
-     * also sheds a failed download from before the repair: that failure was the missing
-     * ISRC's, not the sources', so its badge clears for a fresh attempt. Once per playlist
+     * songs lack is filled from it (ImportedPlaylists.repair). A song the repair completes
+     * also sheds a failed download from before the repair: that failure belonged to the
+     * broken row's era, not to the sources, so its badge clears for a fresh attempt. Once per playlist
      * per run, off the page's own path; a failed re-read leaves everything exactly as it
      * is, and a later run may try again.
      */
@@ -1050,8 +1050,8 @@ class Api constructor(
                 val fresh = PlaylistImport.fetchSpotify(link.id)
                 val byId = fresh.songs.filter { it.spotifyTrackId.isNotBlank() }.associateBy { it.spotifyTrackId }
                 if (byId.isNotEmpty()) {
-                    val resolvable = ImportedPlaylists.repair(p.id, byId)
-                    resolvable.forEach { com.music.spotui.data.offline.OfflineDownloader.forgetFailed(it) }
+                    val repaired = ImportedPlaylists.repair(p.id, byId)
+                    repaired.forEach { com.music.spotui.data.offline.OfflineDownloader.forgetFailed(it) }
                 }
             }.onFailure { if (it !is CancellationException) Log.w("Api", "Imported playlist repair for ${p.name}: $it") }
         }

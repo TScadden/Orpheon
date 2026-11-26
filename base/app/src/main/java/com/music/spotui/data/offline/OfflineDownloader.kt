@@ -225,10 +225,10 @@ object OfflineDownloader {
     /**
      * Forgets a song's failed download, back to plain not-downloaded: its badge clears and
      * the next download tap starts from the song as it is now. For a song whose failure the
-     * app has since repaired the cause of (an imported song that gained its ISRC from the
-     * playlist repair — without it no source could be matched, so the failure said nothing
-     * about the sources). Only a [OfflineStatus.Failed] song is forgotten: a queued or
-     * running download, and a downloaded song, are left exactly as they are.
+     * app has since repaired the cause of (an imported song the playlist repair completed —
+     * a missing ISRC or missing art: the failure belonged to the broken row's era and said
+     * nothing about the sources). Only a [OfflineStatus.Failed] song is forgotten: a queued
+     * or running download, and a downloaded song, are left exactly as they are.
      */
     fun forgetFailed(trackId: String) {
         if (OfflineStore.status[trackId] != OfflineStatus.Failed) return

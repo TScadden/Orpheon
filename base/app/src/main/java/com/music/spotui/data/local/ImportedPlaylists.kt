@@ -134,11 +134,11 @@ object ImportedPlaylists {
      * the list itself never changes (no song added, taken out or moved). For playlists
      * imported before imports kept the full reading — the embed page's rows carry no ISRC,
      * no cover and no album (see Api's repair on the playlist page). Returns the Spotify
-     * track ids whose ISRC this pass filled: the songs that could not be matched to a
-     * source before and can be now.
+     * track ids of the songs this pass completed in any field: the songs whose stored row
+     * was part of the broken import, ISRC or art or album alike.
      */
     fun repair(id: String, freshByTrackId: Map<String, ImportedSong>): Set<String> {
-        val isrcFilled = LinkedHashSet<String>()
+        val repaired = LinkedHashSet<String>()
         update {
             playlists[id]?.let { p ->
                 var changed = false
@@ -150,14 +150,14 @@ object ImportedPlaylists {
                     if (isrc == s.isrc && cover == s.coverUrl && album == s.album) s
                     else {
                         changed = true
-                        if (s.isrc.isBlank() && isrc.isNotBlank()) isrcFilled += s.spotifyTrackId
+                        repaired += s.spotifyTrackId
                         s.copy(isrc = isrc, coverUrl = cover, album = album)
                     }
                 }
                 if (changed) playlists[id] = p.copy(items = items)
             }
         }
-        return isrcFilled
+        return repaired
     }
 
     private fun update(change: () -> Unit) {
