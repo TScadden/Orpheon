@@ -394,6 +394,9 @@
     <string name="update_allow">Allow</string>
     <string name="update_failed">The update failed: %1$s</string>
     <string name="update_retry">Try again</string>
+    <string name="update_no_space">Not enough free space for this update — free up about %1$d MB and try again</string>
+    <string name="update_no_space_install">Not enough free space for this update — free up some space and try again</string>
+    <string name="update_install_failed_plain">The install didn\'t go through — try again</string>
     <!-- A18: the automatic update check can be turned off; the manual check stays. -->
     <string name="settings_auto_update_title">Check for updates automatically</string>
     <string name="settings_auto_update_detail">Scadify checks for a new version every 3 hours and offers it here. Off: no automatic check; the manual check below still works.</string>

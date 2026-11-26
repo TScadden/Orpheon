@@ -35,6 +35,12 @@ object AppUpdater {
         /** Android needs "Install unknown apps" allowed for Myspoti first. */
         data object NeedsPermission : State
         /**
+         * Not enough free space for the update, seen before anything was downloaded
+         * (or reported by the installer afterwards). [message] is the whole sentence
+         * the dialog shows, as-is — not wrapped in the generic failure frame.
+         */
+        data class NoSpace(val message: String) : State
+        /**
          * [onlyByHand]: Android refused the APK over the installed app (signed with another key,
          * or another package): retrying cannot help, the release page is the way.
          */
@@ -72,6 +78,19 @@ object AppUpdater {
     suspend fun update(context: Context, release: UpdateChecker.Release) {
         val app = context.applicationContext
         if (!canInstall(app)) { _state.value = State.NeedsPermission; return }
+        // Fail fast on space, before a byte moves: the staged download and the
+        // installer's own staging copy coexist during the swap, so an update needs
+        // about twice its size free (Tyson's v16 install died at the installer with
+        // INSTALL_FAILED_INSUFFICIENT_STORAGE after a full download). A failed
+        // StatFs read must never block an update: the check then simply passes.
+        if (release.sizeBytes > 0) {
+            val usable = runCatching { android.os.StatFs(app.cacheDir.path).availableBytes }.getOrDefault(Long.MAX_VALUE)
+            val shortfallMb = updateSpaceShortfallMb(usable, release.sizeBytes)
+            if (shortfallMb > 0) {
+                _state.value = State.NoSpace(app.getString(app.myspoti.engine.R.string.update_no_space, shortfallMb))
+                return
+            }
+        }
         _state.value = State.Downloading(-1f)
         val apk = File(File(app.cacheDir, "updates"), "scadify-${release.version}.apk")
         val result = runCatching {
@@ -168,12 +187,64 @@ object AppUpdater {
                 // On success this process is replaced by the new version.
                 PackageInstaller.STATUS_SUCCESS -> _state.value = State.Idle
                 PackageInstaller.STATUS_FAILURE_ABORTED -> _state.value = State.Idle
-                PackageInstaller.STATUS_FAILURE_CONFLICT, PackageInstaller.STATUS_FAILURE_INCOMPATIBLE ->
-                    _state.value = State.Failed(context.getString(app.myspoti.engine.R.string.sys_update_conflict), onlyByHand = true)
-                else -> _state.value = State.Failed(
-                    intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "install status $status",
-                )
+                else -> {
+                    // The raw installer text stays in the log; the dialog gets a plain
+                    // sentence (a raw "INSTALL_FAILED_..." string is what Tyson saw).
+                    val raw = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
+                    android.util.Log.w("AppUpdater", "install failed: status $status: $raw")
+                    _state.value = when (updateFailureKind(status, raw)) {
+                        UpdateFailureKind.STORAGE ->
+                            State.NoSpace(context.getString(app.myspoti.engine.R.string.update_no_space_install))
+                        UpdateFailureKind.MISMATCH ->
+                            State.Failed(context.getString(app.myspoti.engine.R.string.sys_update_mismatch), onlyByHand = true)
+                        UpdateFailureKind.OTHER ->
+                            State.Failed(context.getString(app.myspoti.engine.R.string.update_install_failed_plain))
+                    }
+                }
             }
         }
+    }
+}
+
+/** Bytes that must be free before an update of [apkBytes] starts: the staged
+ *  download and the installer's own staging copy coexist during the swap. */
+internal fun updateSpaceRequiredBytes(apkBytes: Long): Long = apkBytes * 2
+
+/**
+ * Whole MB the user still has to free before an update of [apkBytes] fits in
+ * [usableBytes] — 0 when it fits. Rounded up to a whole 10 MB so the number
+ * asked for carries a little slack for the installer's own variance.
+ */
+internal fun updateSpaceShortfallMb(usableBytes: Long, apkBytes: Long): Long {
+    val missing = updateSpaceRequiredBytes(apkBytes) - usableBytes
+    if (missing <= 0) return 0
+    val mb = (missing + 999_999) / 1_000_000
+    return (mb + 9) / 10 * 10
+}
+
+/** What an installer failure means, in the dialog's terms. */
+internal enum class UpdateFailureKind { STORAGE, MISMATCH, OTHER }
+
+/**
+ * Classifies a PackageInstaller failure from its status code and the raw
+ * EXTRA_STATUS_MESSAGE (which carries the "INSTALL_FAILED_..." name). STORAGE:
+ * the phone ran out of room. MISMATCH: the APK cannot go over the installed
+ * app (invalid APK, signature or provider conflicts) — retrying cannot help.
+ * Everything else is OTHER.
+ */
+internal fun updateFailureKind(status: Int, rawMessage: String?): UpdateFailureKind {
+    val raw = rawMessage ?: ""
+    return when {
+        status == PackageInstaller.STATUS_FAILURE_STORAGE ||
+            "INSTALL_FAILED_INSUFFICIENT_STORAGE" in raw -> UpdateFailureKind.STORAGE
+        status == PackageInstaller.STATUS_FAILURE_CONFLICT ||
+            status == PackageInstaller.STATUS_FAILURE_INCOMPATIBLE ||
+            status == PackageInstaller.STATUS_FAILURE_INVALID ||
+            "INSTALL_FAILED_INVALID_APK" in raw ||
+            "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in raw ||
+            "INSTALL_FAILED_CONFLICTING_PROVIDER" in raw ||
+            "INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES" in raw ||
+            "INSTALL_PARSE_FAILED_BAD_MANIFEST" in raw -> UpdateFailureKind.MISMATCH
+        else -> UpdateFailureKind.OTHER
     }
 }

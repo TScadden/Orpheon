@@ -42,4 +42,8 @@
     <string name="wear_update_needs_permission">Allow Scadify to install apps first — then the install continues.</string>
     <string name="wear_update_allow">Allow</string>
     <string name="wear_update_conflict">Android refused this version over the installed app: it was signed with another key. It can only be put on the watch by hand.</string>
+    <string name="wear_update_no_space">Not enough free space for this update — free up about %1$d MB and try again</string>
+    <string name="wear_update_no_space_install">Not enough free space for this update — free up some space and try again</string>
+    <string name="wear_update_mismatch">This update doesn\'t match the installed app, so it can\'t be installed over it</string>
+    <string name="wear_update_install_failed_plain">The install didn\'t go through — try again</string>
 </resources>

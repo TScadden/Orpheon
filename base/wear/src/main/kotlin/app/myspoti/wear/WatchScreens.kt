@@ -227,6 +227,8 @@ internal fun WatchUpdatePrompt(
         WearUpdater.State.Installing -> stringResource(R.string.wear_update_installing)
         WearUpdater.State.NeedsPermission -> stringResource(R.string.wear_update_needs_permission)
         is WearUpdater.State.Failed -> if (s.onlyByHand) s.message else stringResource(R.string.wear_failed, s.message)
+        // The space sentence stands on its own: shown exactly as written.
+        is WearUpdater.State.NoSpace -> s.message
         WearUpdater.State.Idle -> null
     }
     ScreenScaffold(scrollState = columnState) { padding ->
@@ -246,7 +248,7 @@ internal fun WatchUpdatePrompt(
             if (status != null) item {
                 Text(
                     status, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall,
-                    color = if (state is WearUpdater.State.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (state is WearUpdater.State.Failed || state is WearUpdater.State.NoSpace) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -259,6 +261,7 @@ internal fun WatchUpdatePrompt(
                     Text(stringResource(when (state) {
                         WearUpdater.State.NeedsPermission -> R.string.wear_update_allow
                         is WearUpdater.State.Failed -> R.string.wear_retry
+                        is WearUpdater.State.NoSpace -> R.string.wear_retry
                         else -> R.string.wear_update_install
                     }), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
