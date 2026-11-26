@@ -223,7 +223,7 @@ class AmazonReadSession(context: Context, val url: String) {
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.loadsImagesAutomatically = false
-        settings.blockNetworkImages = true
+        settings.blockNetworkImage = true
         settings.userAgentString = UA
         webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) { loadGate?.complete(true) }
