@@ -592,7 +592,6 @@
     <string name="equalizer_skip_silence">Pular silêncios</string>
     <string name="equalizer_skip_silence_detail">Os trechos silenciosos são pulados (pausas longas em um episódio, um silêncio antes de uma faixa oculta).</string>
     <string name="download_source_not_answering">%1$s sem resposta por enquanto</string>
-    <string name="friends_tab">Amigos</string>
     <string name="library_podcasts_empty">Você ainda não segue nenhum podcast</string>
     <string name="library_podcasts_error">Não foi possível carregar seus podcasts</string>
     <string name="settings_player_volume_title">Barra de volume no leitor</string>

@@ -169,7 +169,6 @@ fun MainBottomNavigation(navController: NavHostController) {
     )
 }
 
-// Friend activity opens from Home's header (as in Spotify), not from a tab.
 /** The tabs, in the order an extension's look sets (`ui.order.nav`) or the app's own. */
 private val TabItems: List<Routes>
     get() {

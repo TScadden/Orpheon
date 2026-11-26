@@ -147,27 +147,6 @@ data class TopContent(
     val trackTotal: Int? = null,
 )
 
-/**
- * A friend's latest listen (the official "Friend Activity" feed): someone the account follows
- * who shares their listening activity. [trackImageUrl] is the cover Spotify sends with it and
- * [contextName] the playlist, album or artist it was played from.
- */
-data class FriendActivity(
-    val user: UserRef,
-    val track: Track?,
-    val contextUri: Uri?,
-    val timestampMs: Long,
-    val contextName: String? = null,
-    val trackImageUrl: String? = null,
-    /** What the mobile feed says (playing right now or not); null when the feed does not say (the buddylist). */
-    val playing: Boolean? = null,
-) {
-    /** The feed's own answer when it gives one, else "listening now" for 15 minutes after the last play started, as the official feed shows it. */
-    fun isNowPlaying(nowMs: Long = System.currentTimeMillis()): Boolean = playing ?: (nowMs - timestampMs in 0 until NOW_PLAYING_MS)
-
-    companion object { const val NOW_PLAYING_MS = 15 * 60_000L }
-}
-
 data class UserRef(val uri: Uri, val name: String, val imageUrl: String?)
 
 // --- Podcasts and audiobooks -------------------------------------------------

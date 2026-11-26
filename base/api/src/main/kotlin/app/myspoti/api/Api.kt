@@ -270,11 +270,6 @@ interface Users {
     suspend fun blockUser(userUri: Uri)
     /** Lifts the block ([blockUser]'s `DELETE`). */
     suspend fun unblockUser(userUri: Uri)
-    /**
-     * What the people the account follows are listening to, latest first. Throws when Spotify
-     * refuses the feed (an empty list means nobody shares their activity).
-     */
-    suspend fun friendActivity(): List<FriendActivity>
     /** Contexts played lately (Recents). */
     suspend fun history(): List<HistoryEntry>
     suspend fun setPrivateSession(on: Boolean)

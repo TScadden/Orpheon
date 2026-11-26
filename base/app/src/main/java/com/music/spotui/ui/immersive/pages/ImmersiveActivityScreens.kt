@@ -35,7 +35,6 @@ import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -59,9 +58,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
-import app.myspoti.api.FriendActivity
 import app.myspoti.engine.R
-import app.myspoti.host.android.MyspotiRuntime
 import com.music.spotui.data.local.LocalMusic
 import com.music.spotui.data.local.LocalTrack
 import com.music.spotui.di.LocalPlayer
@@ -87,90 +84,11 @@ import com.music.spotui.ui.immersive.components.immersiveClickable
 import com.music.spotui.ui.immersive.components.immersiveSongListSkeleton
 import com.music.spotui.ui.immersive.motion.immersiveItemPlacement
 import com.music.spotui.ui.immersive.shell.ImmersiveBarAction
-import com.music.spotui.ui.navigation.profileRoute
 import com.music.spotui.ui.navigation.showRoute
 import com.music.spotui.ui.screens.AddLocalToPlaylistSheet
 import com.music.spotui.ui.screens.LocalFoldersSheet
 import com.music.spotui.ui.viewmodel.EpisodeViewModel
 import kotlinx.coroutines.launch
-
-// ---------------------------------------------------------------- Friends
-
-/**
- * Friend activity of the Immersive look: each followed person sharing their listening, with the
- * latest track and where it was played from. Tap the person for their profile, the row to play.
- */
-@Composable
-fun ImmersiveFriendsScreen(navController: NavController) {
-    var attempt by remember { mutableIntStateOf(0) }
-    var state by remember { mutableStateOf<Result<List<FriendActivity>>?>(null) }
-    LaunchedEffect(attempt) { state = runCatching { MyspotiRuntime.api.users.friendActivity() } }
-    val now = remember(state) { System.currentTimeMillis() }
-    ImmersivePage(
-        title = stringResource(R.string.friends_title),
-        // Opened from Home's header (no longer a tab): back to it.
-        onBack = { navController.popBackStack() },
-        actions = {
-            ImmersiveBarAction(Icons.Rounded.Refresh, stringResource(R.string.friends_refresh), onClick = { state = null; attempt++ })
-        },
-    ) {
-        val s = state
-        val friends = s?.getOrNull()
-        when {
-            s == null -> immersiveSongListSkeleton(count = 6, circular = true)
-            friends == null -> item(key = "failed") {
-                ImmersiveMessageState(stringResource(R.string.friends_failed), actionLabel = stringResource(R.string.retry_button),
-                    onAction = { state = null; attempt++ })
-            }
-            friends.isEmpty() -> item(key = "empty") { ImmersiveMessageState(stringResource(R.string.friends_empty)) }
-            else -> items(friends, key = { it.user.uri }) { f ->
-                Column(immersiveItemPlacement()) { ImmersiveFriendRow(f, now, navController) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ImmersiveFriendRow(f: FriendActivity, now: Long, navController: NavController) {
-    val track = f.track
-    val openProfile = { navController.navigate(profileRoute(f.user.uri.substringAfterLast(':'), f.user.name)) }
-    Row(
-        verticalAlignment = Alignment.Top,
-        modifier = Modifier.fillMaxWidth()
-            .immersiveClickable(onClick = { if (track != null) SongPlayer.playSong(track.uri, contextUri = f.contextUri) else openProfile() }, pressedScale = 0.99f)
-            .padding(horizontal = Immersive.Gutter, vertical = 10.dp),
-    ) {
-        Box(Modifier.clip(CircleShape).clickable(onClick = openProfile)) {
-            com.music.spotui.ui.components.ProfileAvatar(url = f.user.imageUrl, name = f.user.name, size = 48.dp)
-        }
-        Column(Modifier.padding(start = 12.dp).weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // The name takes the room, so the time sits at the end, by the cover.
-                Text(f.user.name, style = Immersive.BodyStrong, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                if (f.isNowPlaying(now)) {
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(Immersive.Accent))
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.friends_now), style = Immersive.Caption.copy(color = Immersive.Accent), maxLines = 1)
-                } else if (f.timestampMs > 0) {
-                    Text(
-                        android.text.format.DateUtils.getRelativeTimeSpanString(f.timestampMs, now,
-                            android.text.format.DateUtils.MINUTE_IN_MILLIS, android.text.format.DateUtils.FORMAT_ABBREV_RELATIVE).toString(),
-                        style = Immersive.Caption, maxLines = 1,
-                    )
-                }
-            }
-            if (track != null) {
-                Text(listOf(track.name, track.artists.joinToString(", ") { it.name }).filter { it.isNotBlank() }.joinToString(" • "),
-                    style = Immersive.Subhead.copy(color = Immersive.Text), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
-                val where = f.contextName ?: track.album?.name
-                if (!where.isNullOrBlank()) Text(where, style = Immersive.Caption, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
-            }
-        }
-        f.trackImageUrl?.let { cover ->
-            ImmersiveCover(cover.replaceFirst("http://", "https://"), Modifier.padding(start = 10.dp).size(44.dp), Immersive.CoverSmall)
-        }
-    }
-}
 
 // ---------------------------------------------------------------- Local files
 

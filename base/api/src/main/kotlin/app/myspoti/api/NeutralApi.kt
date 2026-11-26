@@ -153,7 +153,6 @@ class NeutralApi : MyspotiApi {
         override suspend fun isBlocked(userUri: Uri): Boolean = false
         override suspend fun blockUser(userUri: Uri) = no(userUri)
         override suspend fun unblockUser(userUri: Uri) = no(userUri)
-        override suspend fun friendActivity(): List<FriendActivity> = emptyList()
         override suspend fun history(): List<HistoryEntry> = emptyList()
         override suspend fun setPrivateSession(on: Boolean) {}
     }

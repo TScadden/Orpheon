@@ -120,7 +120,6 @@ internal fun rememberTabNavigation(navController: NavController): TabNavigation 
     return TabNavigation(selectedTab, onTabClick, fullScreen)
 }
 
-// Friend activity is not a tab any more: it opens from Home's header, as in Spotify.
 private val TabRoutes = listOf(Routes.Home.route, Routes.Search.route, Routes.Library.route)
 
 /** The tabs the bar shows. */
