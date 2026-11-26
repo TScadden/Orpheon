@@ -8,6 +8,7 @@ import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import app.myspoti.engine.R as EngineR
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -87,7 +88,7 @@ object AppUpdater {
             val usable = runCatching { android.os.StatFs(app.cacheDir.path).availableBytes }.getOrDefault(Long.MAX_VALUE)
             val shortfallMb = updateSpaceShortfallMb(usable, release.sizeBytes)
             if (shortfallMb > 0) {
-                _state.value = State.NoSpace(app.getString(app.myspoti.engine.R.string.update_no_space, shortfallMb))
+                _state.value = State.NoSpace(app.getString(EngineR.string.update_no_space, shortfallMb))
                 return
             }
         }
