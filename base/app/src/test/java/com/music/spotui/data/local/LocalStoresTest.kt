@@ -58,6 +58,38 @@ class LocalStoresTest {
         assertTrue(ImportedPlaylists.list().isEmpty())
     }
 
+    @Test fun importedExplicitMarksSurviveARestartAsText() {
+        val p = ImportedPlaylists.create("Marked Mix", "https://open.spotify.com/playlist/xyz", listOf(
+            ImportedSong("", "AAA", "One", "Artist A", "Alb", 201_000L, "", "", "", app.myspoti.api.Explicitness.EXPLICIT),
+            ImportedSong("", "BBB", "Two", "Artist B", "Other", 182_000L, "", "", "", app.myspoti.api.Explicitness.CLEAN),
+            ImportedSong("", "CCC", "Three", "Artist C", "Other", 182_000L, ""),
+        ))
+        val text = ImportedPlaylists.write()
+        ImportedPlaylists.playlists.clear()
+        ImportedPlaylists.read(text)
+        val again = ImportedPlaylists.playlists.getValue(p.id)
+        assertEquals(app.myspoti.api.Explicitness.EXPLICIT, again.items[0].explicit)
+        assertEquals(app.myspoti.api.Explicitness.CLEAN, again.items[1].explicit)
+        assertEquals(app.myspoti.api.Explicitness.UNKNOWN, again.items[2].explicit)
+        ImportedPlaylists.delete(p.id)
+        assertTrue(ImportedPlaylists.list().isEmpty())
+    }
+
+    @Test fun importedFilesWrittenBeforeTheExplicitMarkLoadAsUnknown() {
+        // A store file from before the mark was kept: no "explicit" key on its
+        // songs (and a garbage value reads the same way). Unjudged, never a guess.
+        ImportedPlaylists.read("""{"version":1,"playlists":[
+          {"id":"old1","name":"Old Mix","source":"https://open.spotify.com/playlist/xyz","created":1,"cover":"","items":[
+            {"key":"k1","track":"AAA","title":"One","artist":"Artist A","album":"Alb","duration":201000,"cover":"","isrc":"","asin":""},
+            {"key":"k2","track":"BBB","title":"Two","artist":"Artist B","album":"Other","duration":182000,"cover":"","isrc":"","asin":"","explicit":"LOUD"}
+          ]}]}""")
+        val again = ImportedPlaylists.playlists.getValue("old1")
+        assertEquals(app.myspoti.api.Explicitness.UNKNOWN, again.items[0].explicit)
+        assertEquals(app.myspoti.api.Explicitness.UNKNOWN, again.items[1].explicit)
+        ImportedPlaylists.delete("old1")
+        assertTrue(ImportedPlaylists.list().isEmpty())
+    }
+
     @Test fun anImportedSongsIsrcSurvivesARestartAsText() {
         val p = ImportedPlaylists.create("With Isrc", "https://open.spotify.com/playlist/isrc", listOf(
             ImportedSong("", "AAA", "One", "Artist A", "Alb", 201_000L, "", "USS1Z2500001"),

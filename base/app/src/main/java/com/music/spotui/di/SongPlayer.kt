@@ -522,13 +522,17 @@ object SongPlayer {
 
     /**
      * A hidden song the player moved on to by itself (the list, the radio, the queue, a skip) is
-     * skipped. Songs picked by hand play; a run of skips ends at the first song met twice, or at
+     * skipped — and so is a song the playing item itself states is explicit while explicit
+     * music is off (the same rule as the local player's, for the engine's own queue).
+     * Songs picked by hand play; a run of skips ends at the first song met twice, or at
      * [HIDDEN_SKIPS_MAX], and that song then plays.
      */
-    private fun skipHidden(id: String, uri: String) {
+    private fun skipHidden(id: String, uri: String, explicit: Boolean = false) {
         val byHand = uri == playedByHand
         if (!byHand) playedByHand = ""
-        if (byHand || !com.music.spotui.data.preferences.HiddenSongs.isHidden(id)) { hiddenSkipped.clear(); return }
+        val blocked = com.music.spotui.data.preferences.HiddenSongs.isHidden(id) ||
+            com.music.spotui.data.preferences.ExplicitFilter.blocks(explicit, com.music.spotui.data.preferences.ExplicitPref.allowed)
+        if (byHand || !blocked) { hiddenSkipped.clear(); return }
         if (!hiddenSkipped.add(id) || hiddenSkipped.size > HIDDEN_SKIPS_MAX) {
             app.myspoti.host.android.Logbook.log("hidden: only hidden songs left, $id plays")
             hiddenSkipped.clear(); playedByHand = uri
@@ -625,7 +629,7 @@ object SongPlayer {
             autoplayHandledUri = uri
             if (!s.isPaused) pauseSilently()
         }
-        if (item != null && trackChanged && playing && !adState.value && uri.startsWith(SPOTIFY_TRACK_PREFIX)) skipHidden(id, uri)
+        if (item != null && trackChanged && playing && !adState.value && uri.startsWith(SPOTIFY_TRACK_PREFIX)) skipHidden(id, uri, item.explicit)
         currentContextUri = s.contextUri.orEmpty()
         if (item != null) { checkEndOfTrackTimer(id); currentTrackId = id }
         _nowPlaying.value = NowPlaying(
@@ -3283,7 +3287,8 @@ object SongPlayer {
     private fun localSong(t: com.music.spotui.data.local.LocalTrack, dur: Long = t.durationMs): SongsModel {
         val trackId = streamedTrackId(t)
         return SongsModel(id = if (trackId.isNotBlank()) songIdFor(trackId, "") else ("local:" + t.id).hashCode() and 0x7fffffff, title = t.title, album = t.album,
-            singer = t.artist, coverUri = t.artUri.toString(), url = "local:${t.uri}", durationMs = dur.toInt(), spotifyTrackId = trackId)
+            singer = t.artist, coverUri = t.artUri.toString(), url = "local:${t.uri}", durationMs = dur.toInt(), spotifyTrackId = trackId,
+            explicit = t.explicit, explicitStatus = if (t.explicit) app.myspoti.api.Explicitness.EXPLICIT else app.myspoti.api.Explicitness.UNKNOWN)
     }
 
     /**

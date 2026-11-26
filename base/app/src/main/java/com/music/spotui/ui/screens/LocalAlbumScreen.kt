@@ -190,7 +190,9 @@ fun LocalAlbumScreen(navController: NavController, artist: String, album: String
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                         ) {
                             GlideImage(
-                                model = t.artUri, contentDescription = null, contentScale = ContentScale.Crop,
+                                // Through the art chain like every other surface: a track with
+                                // no art of its own shows the album's set or borrowed cover.
+                                model = LocalCovers.effectiveArt(t.uri.toString(), t.album, t.artUri.toString()), contentDescription = null, contentScale = ContentScale.Crop,
                                 loading = placeholder(R.drawable.placeholder), failure = placeholder(R.drawable.local_files_cover),
                                 modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
                             )

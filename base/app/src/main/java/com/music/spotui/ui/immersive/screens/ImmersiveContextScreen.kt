@@ -859,6 +859,17 @@ private fun ContextHeader(
                 )
             }
         }
+        if (p.hiddenExplicit > 0) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = androidx.compose.ui.res.pluralStringResource(R.plurals.explicit_hidden_songs, p.hiddenExplicit, p.hiddenExplicit),
+                style = Immersive.Caption.copy(fontWeight = FontWeight.Medium),
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = HeaderGutter),
+            )
+        }
 
         if (p.tracks.isNotEmpty()) {
             val thisPlaying = isThisContext && playing

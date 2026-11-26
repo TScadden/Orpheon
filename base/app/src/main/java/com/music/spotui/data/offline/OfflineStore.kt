@@ -44,6 +44,11 @@ data class OfflineTrack(
      * ("Quality: FLAC", manifest `role: quality`), for Stats for nerds; null without one.
      */
     val extensionQuality: String? = null,
+    /**
+     * Known explicit, from the row or record the download was made from, so the
+     * downloaded song keeps its mark. Entries written before it was kept read as false.
+     */
+    val explicit: Boolean = false,
 ) {
     val isEpisode: Boolean get() = kind == KIND_PODCAST
 
@@ -51,7 +56,7 @@ data class OfflineTrack(
         .put("id", trackId).put("title", title).put("artist", artist).put("album", album)
         .put("albumId", albumId).put("duration", durationMs).put("coverUrl", coverUrl)
         .put("file", file).put("cover", cover).put("source", source).put("verified", verified)
-        .put("bytes", bytes).put("added", addedAt).put("kind", kind)
+        .put("bytes", bytes).put("added", addedAt).put("kind", kind).put("explicit", explicit)
         .apply { providerId?.let { put("providerId", it) } }
         .apply { extensionQuality?.let { put("extQuality", it) } }
 
@@ -70,6 +75,7 @@ data class OfflineTrack(
             // Absent in an index written before it was kept: unknown.
             providerId = o.optString("providerId").ifBlank { null },
             extensionQuality = o.optString("extQuality").ifBlank { null },
+            explicit = o.optBoolean("explicit"),
         )
     }
 }
@@ -282,6 +288,7 @@ object OfflineStore {
         durationMs = t.durationMs,
         artUri = coverFile(t)?.let { Uri.fromFile(it) } ?: Uri.parse(t.coverUrl),
         speech = t.isEpisode,
+        explicit = t.explicit,
     )
 
     fun toSong(t: OfflineTrack) = SongsModel(
@@ -293,6 +300,8 @@ object OfflineStore {
         url = if (t.isEpisode) t.trackId else "spotify:track:${t.trackId}",
         spotifyTrackId = if (t.isEpisode) "" else t.trackId,
         durationMs = t.durationMs.toInt(), albumId = t.albumId,
+        explicit = t.explicit,
+        explicitStatus = if (t.explicit) app.myspoti.api.Explicitness.EXPLICIT else app.myspoti.api.Explicitness.UNKNOWN,
     )
 
     /** Negative, so it never collides with a MediaStore id (Local Files). */

@@ -484,6 +484,12 @@
     <string name="share_as_image">Share as image</string>
     <string name="settings_autoplay_title">Autoplay</string>
     <string name="settings_autoplay_detail">When your music ends, keep playing similar songs</string>
+    <string name="settings_explicit_title">Allow explicit music</string>
+    <string name="settings_explicit_detail">Off: songs marked explicit are hidden from lists and search, and skipped in the queue. Songs no source has marked are never hidden.</string>
+    <plurals name="explicit_hidden_songs">
+        <item quantity="one">%d song hidden by your explicit setting</item>
+        <item quantity="other">%d songs hidden by your explicit setting</item>
+    </plurals>
     <string name="myspoti_shuffle_title">Scadify shuffle</string>
     <string name="myspoti_shuffle_detail">With shuffle on, a playlist, album or Liked Songs plays every song once, in a random order, before starting over.</string>
     <string name="myspoti_shuffle_imposed">Scadify shuffle is off for this list.</string>

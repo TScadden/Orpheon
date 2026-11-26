@@ -979,6 +979,13 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
                                 Text(p.metaLine, color = AppText.copy(alpha = 0.7f), fontSize = 13.sp)
                             }
                         }
+                        if (p.hiddenExplicit > 0) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                androidx.compose.ui.res.pluralStringResource(R.plurals.explicit_hidden_songs, p.hiddenExplicit, p.hiddenExplicit),
+                                color = AppText.copy(alpha = 0.7f), fontSize = 13.sp,
+                            )
+                        }
                     }
                 }
                 val actions: @Composable () -> Unit = {

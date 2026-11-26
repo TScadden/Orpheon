@@ -48,6 +48,8 @@ object CatalogCompletion {
         val coverUrl: String,
         val durationMs: Long,
         val isrc: String,
+        /** The hit's stated explicitness (Deezer and iTunes state it): UNKNOWN when it does not. */
+        val explicit: app.myspoti.api.Explicitness = app.myspoti.api.Explicitness.UNKNOWN,
     )
 
     /** Where candidates come from: the live catalog chain, or a test's stand-in. */
@@ -62,7 +64,8 @@ object CatalogCompletion {
 
     /** A song still missing any of the fields a completion can fill. */
     fun thin(song: ImportedSong): Boolean =
-        song.isrc.isBlank() || song.coverUrl.isBlank() || song.album.isBlank()
+        song.isrc.isBlank() || song.coverUrl.isBlank() || song.album.isBlank() ||
+            song.explicit == app.myspoti.api.Explicitness.UNKNOWN
 
     /** Whether [c] may complete [song], under the strict bar in the class doc. */
     fun accepted(song: ImportedSong, c: Candidate): Boolean {
@@ -100,11 +103,13 @@ object CatalogCompletion {
         }
     }
 
-    /** [song] with its blank ISRC / cover / album filled from [c]; present fields stand. */
+    /** [song] with its blank ISRC / cover / album filled from [c]; present fields stand.
+     * An unjudged song also takes the candidate's stated explicitness; a stated one stands. */
     fun completed(song: ImportedSong, c: Candidate): ImportedSong = song.copy(
         isrc = song.isrc.ifBlank { c.isrc },
         coverUrl = song.coverUrl.ifBlank { c.coverUrl },
         album = song.album.ifBlank { c.album },
+        explicit = if (song.explicit == app.myspoti.api.Explicitness.UNKNOWN) c.explicit else song.explicit,
     )
 
     /**
@@ -160,5 +165,6 @@ object CatalogCompletion {
         coverUrl = track.album?.images?.best(300)?.url.orEmpty(),
         durationMs = track.durationMs,
         isrc = isrc.orEmpty(),
+        explicit = track.explicitness,
     )
 }

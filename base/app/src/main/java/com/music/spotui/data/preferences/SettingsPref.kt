@@ -100,6 +100,24 @@ object SolidNavBar {
     }
 }
 
+/**
+ * "Allow explicit music" (on by default: nothing changes). Off: songs a source marks
+ * explicit leave the lists and search, and a queue that reaches one skips it. Songs no
+ * source has judged (most phone files) are never touched — see [ExplicitFilter].
+ * Read as state by both looks; read live by the players.
+ */
+object ExplicitPref {
+    private const val KEY = "allow_explicit"
+    var allowed by androidx.compose.runtime.mutableStateOf(
+        runCatching { prefs(com.music.spotui.di.Graph.app).getBoolean(KEY, true) }.getOrDefault(true))
+        private set
+
+    fun set(c: Context, value: Boolean) {
+        allowed = value
+        prefs(c).edit().putBoolean(KEY, value).apply()
+    }
+}
+
 /** "When your music ends, keep playing similar songs" (on by default). Read by the player. */
 object AutoplayPref {
     private const val KEY = "autoplay_similar"

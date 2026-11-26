@@ -26,6 +26,8 @@ data class DownloadMeta(
     val albumId: String,
     val durationMs: Long,
     val coverUrl: String?,
+    /** The track's explicitness as the sources state it; UNKNOWN when none does. */
+    val explicitness: app.myspoti.api.Explicitness = app.myspoti.api.Explicitness.UNKNOWN,
 ) {
     companion object {
         /** The first of [values] that is not blank, or "". */
@@ -65,6 +67,9 @@ data class DownloadMeta(
                 durationMs = spotify?.track?.durationMs?.takeIf { it > 0 }
                     ?: hit.track.durationMs.takeIf { it > 0 } ?: base.durationMs,
                 coverUrl = spotify?.let { coverOf(it) } ?: coverOf(hit) ?: base.coverUrl,
+                explicitness = spotify?.track?.explicitness?.takeIf { it != app.myspoti.api.Explicitness.UNKNOWN }
+                    ?: hit.track.explicitness.takeIf { it != app.myspoti.api.Explicitness.UNKNOWN }
+                    ?: base.explicitness,
             )
         }
     }

@@ -2081,10 +2081,13 @@ object LocalPlayer {
     private fun skipHidden(p: ExoPlayer, reason: Int): Boolean {
         val t = current()
         val hidden = t != null && com.music.spotui.data.preferences.HiddenSongs.isHidden(spotifyIdOf(t))
+        // A known-explicit song is skipped the same way while explicit music is off;
+        // a song nothing has marked (the phone's own files above all) is never skipped.
+        val explicitBlocked = t != null && com.music.spotui.data.preferences.ExplicitFilter.blocks(t.explicit, com.music.spotui.data.preferences.ExplicitPref.allowed)
         val ours = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || (hiddenRun > 0 && reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK)
-        if (!hidden || !ours || hiddenRun >= tracks.size || !p.hasNextMediaItem()) { hiddenRun = 0; return false }
+        if (!(hidden || explicitBlocked) || !ours || hiddenRun >= tracks.size || !p.hasNextMediaItem()) { hiddenRun = 0; return false }
         hiddenRun++
-        log("skipped ${t?.title}: hidden (not interested)")
+        log("skipped ${t?.title}: ${if (explicitBlocked && !hidden) "explicit (setting off)" else "hidden (not interested)"}")
         next()
         return true
     }

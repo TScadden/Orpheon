@@ -5,6 +5,7 @@ import app.myspoti.api.Album
 import app.myspoti.api.AlbumRef
 import app.myspoti.api.Artist
 import app.myspoti.api.ArtistRef
+import app.myspoti.api.Explicitness
 import app.myspoti.api.Image
 import app.myspoti.api.Page
 import app.myspoti.api.Track
@@ -91,7 +92,8 @@ class Deezer(private val fetch: Fetch, private val base: String = "https://api.d
                 durationMs = (o.long("duration") ?: 0) * 1000,
                 artists = artists,
                 album = album ?: own,
-                explicit = o.bool("explicit_lyrics") ?: false,
+                explicit = explicitnessOf(o.bool("explicit_lyrics")) == Explicitness.EXPLICIT,
+                explicitness = explicitnessOf(o.bool("explicit_lyrics")),
                 playable = o.bool("readable") ?: true,
             ),
             o.str("isrc"),

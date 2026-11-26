@@ -323,6 +323,52 @@ class CatalogTest {
         assertTrue(runCatching { d.track("404") }.exceptionOrNull() is NotFound)
     }
 
+    // The explicit tri-state (v23): only a stated judgement counts. iTunes words
+    // and Deezer's flag map to EXPLICIT / CLEAN; a source that says nothing
+    // leaves the track UNKNOWN — never badged, never hidden.
+    @Test fun explicitnessWordsAndFlags() {
+        assertEquals(app.myspoti.api.Explicitness.EXPLICIT, explicitnessOf("explicit"))
+        assertEquals(app.myspoti.api.Explicitness.CLEAN, explicitnessOf("cleaned"))
+        assertEquals(app.myspoti.api.Explicitness.CLEAN, explicitnessOf("notExplicit"))
+        assertEquals(app.myspoti.api.Explicitness.UNKNOWN, explicitnessOf(null as String?))
+        assertEquals(app.myspoti.api.Explicitness.UNKNOWN, explicitnessOf("somethingElse"))
+        assertEquals(app.myspoti.api.Explicitness.EXPLICIT, explicitnessOf(true))
+        assertEquals(app.myspoti.api.Explicitness.CLEAN, explicitnessOf(false))
+        assertEquals(app.myspoti.api.Explicitness.UNKNOWN, explicitnessOf(null as Boolean?))
+    }
+
+    @Test fun deezerExplicitnessStates() = runBlocking {
+        val f = Scripted(mapOf(
+            "/search?" to Response(200, """{"total":3,"data":[
+              {"id":5,"title":"Loud","duration":200,"explicit_lyrics":true,"artist":{"id":7,"name":"Band"},"album":{"id":9,"title":"Album"}},
+              {"id":6,"title":"Quiet","duration":200,"explicit_lyrics":false,"artist":{"id":7,"name":"Band"},"album":{"id":9,"title":"Album"}},
+              {"id":7,"title":"Unjudged","duration":200,"artist":{"id":7,"name":"Band"},"album":{"id":9,"title":"Album"}}]}"""),
+        ))
+        val hits = Deezer(f).searchTracks("song", 0, 10).items
+        assertEquals(app.myspoti.api.Explicitness.EXPLICIT, hits[0].track.explicitness)
+        assertTrue(hits[0].track.explicit)
+        assertEquals(app.myspoti.api.Explicitness.CLEAN, hits[1].track.explicitness)
+        assertTrue(!hits[1].track.explicit)
+        assertEquals(app.myspoti.api.Explicitness.UNKNOWN, hits[2].track.explicitness)
+        assertTrue(!hits[2].track.explicit)
+    }
+
+    @Test fun itunesExplicitnessStates() = runBlocking {
+        val f = Scripted(mapOf(
+            "/search?term=song" to Response(200, """{"resultCount":3,"results":[
+              {"wrapperType":"track","kind":"song","trackId":5,"trackName":"Loud","artistId":7,"artistName":"Band","collectionId":9,"collectionName":"Album","trackTimeMillis":200000,"trackExplicitness":"explicit"},
+              {"wrapperType":"track","kind":"song","trackId":6,"trackName":"Quiet","artistId":7,"artistName":"Band","collectionId":9,"collectionName":"Album","trackTimeMillis":200000,"trackExplicitness":"cleaned"},
+              {"wrapperType":"track","kind":"song","trackId":7,"trackName":"Unjudged","artistId":7,"artistName":"Band","collectionId":9,"collectionName":"Album","trackTimeMillis":200000}]}"""),
+        ))
+        val hits = ITunes(f).searchTracks("song", 0, 10).items
+        assertEquals(app.myspoti.api.Explicitness.EXPLICIT, hits[0].track.explicitness)
+        assertTrue(hits[0].track.explicit)
+        assertEquals(app.myspoti.api.Explicitness.CLEAN, hits[1].track.explicitness)
+        assertTrue(!hits[1].track.explicit)
+        assertEquals(app.myspoti.api.Explicitness.UNKNOWN, hits[2].track.explicitness)
+        assertTrue(!hits[2].track.explicit)
+    }
+
     @Test fun aServiceThatAnswersNonsenseIsDown() = runBlocking {
         val d = Deezer(Scripted(mapOf("/search" to Response(200, "<html>Bad gateway</html>"))))
         assertTrue(runCatching { d.searchTracks("q") }.exceptionOrNull() is ProviderDown)

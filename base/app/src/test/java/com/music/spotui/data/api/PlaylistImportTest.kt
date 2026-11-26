@@ -160,6 +160,61 @@ class PlaylistImportTest {
         assertEquals("Alb", merged[0].album)
     }
 
+    // The explicit mark, from both Spotify reads (v23): the embed trackList's
+    // isExplicit and the API track's explicit. Stated true is EXPLICIT, stated
+    // false is CLEAN, and a read that says nothing leaves the song UNKNOWN —
+    // never badged, never hidden.
+    @Test fun embedTracksCarryTheirExplicitMark() {
+        val parsed = SpotifyEmbed.parseData(JSONObject("""
+            {"props":{"pageProps":{"state":{
+              "data":{"entity":{"name":"Mix","trackCount":3,"trackList":[
+                {"uri":"spotify:track:AAA","title":"One","subtitle":"Artist A","duration":201000,"isExplicit":true},
+                {"uri":"spotify:track:BBB","title":"Two","subtitle":"Artist B","duration":182000,"isExplicit":false},
+                {"uri":"spotify:track:CCC","title":"Three","subtitle":"Artist C","duration":182000}
+              ]}},
+              "settings":{"session":{"accessToken":"tok123"}}
+            }}}}
+        """.trimIndent()))!!
+        assertEquals(app.myspoti.api.Explicitness.EXPLICIT, parsed.tracks[0].explicit)
+        assertEquals(app.myspoti.api.Explicitness.CLEAN, parsed.tracks[1].explicit)
+        assertEquals(app.myspoti.api.Explicitness.UNKNOWN, parsed.tracks[2].explicit)
+    }
+
+    @Test fun apiTracksCarryTheirExplicitMark() {
+        val page = SpotifyEmbed.parseApiPage(JSONObject("""
+            {"total":3,"items":[
+              {"track":{"id":"AAA","name":"One","duration_ms":201000,"explicit":true,
+                 "artists":[{"name":"Artist A"}],"album":{"name":"Alb","images":[]}}},
+              {"track":{"id":"BBB","name":"Two","duration_ms":182000,"explicit":false,
+                 "artists":[{"name":"Artist B"}],"album":{"name":"Other","images":[]}}},
+              {"track":{"id":"CCC","name":"Three","duration_ms":182000,
+                 "artists":[{"name":"Artist C"}],"album":{"name":"Other","images":[]}}}
+            ]}
+        """.trimIndent()))
+        assertEquals(app.myspoti.api.Explicitness.EXPLICIT, page.tracks[0].explicit)
+        assertEquals(app.myspoti.api.Explicitness.CLEAN, page.tracks[1].explicit)
+        assertEquals(app.myspoti.api.Explicitness.UNKNOWN, page.tracks[2].explicit)
+    }
+
+    @Test fun theApiExplicitMarkWinsWhenItStatesOne() {
+        val embed = listOf(
+            song("AAA", "One", "Artist A").copy(explicit = app.myspoti.api.Explicitness.CLEAN),
+            song("BBB", "Two", "Artist B").copy(explicit = app.myspoti.api.Explicitness.EXPLICIT),
+            song("CCC", "Three", "Artist C"),
+        )
+        val api = listOf(
+            song("AAA", "One", "Artist A").copy(explicit = app.myspoti.api.Explicitness.EXPLICIT),
+            song("BBB", "Two", "Artist B"),
+            song("CCC", "Three", "Artist C").copy(explicit = app.myspoti.api.Explicitness.CLEAN),
+        )
+        val merged = SpotifyEmbed.mergeReads(embed, api)
+        // The API stated one: it wins over the embed's.
+        assertEquals(app.myspoti.api.Explicitness.EXPLICIT, merged[0].explicit)
+        // The API said nothing: the embed's judgement stands.
+        assertEquals(app.myspoti.api.Explicitness.EXPLICIT, merged[1].explicit)
+        assertEquals(app.myspoti.api.Explicitness.CLEAN, merged[2].explicit)
+    }
+
     @Test fun apiPageParsesSkipsRemovedAndKeepsTotal() {
         val page = SpotifyEmbed.parseApiPage(JSONObject("""
             {"total":3,"next":"https://api.spotify.com/v1/playlists/x/tracks?offset=100","items":[
