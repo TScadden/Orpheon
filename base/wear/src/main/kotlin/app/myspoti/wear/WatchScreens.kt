@@ -99,10 +99,16 @@ internal fun WatchPager(
     onNext: () -> Unit,
     volume: WatchVolumeUi,
     lists: Result<List<WatchList>>?,
-    onPlay: (WatchList) -> Unit,
+    onOpen: (WatchList) -> Unit,
     onRetry: () -> Unit,
     extensionsNote: String,
     onSyncExtensions: () -> Unit,
+    openList: WatchList? = null,
+    openTracks: Result<List<WatchTrack>>? = null,
+    onCloseList: () -> Unit = {},
+    onPlayList: (WatchList) -> Unit = {},
+    onPlayTrack: (Int) -> Unit = {},
+    onRetryTracks: () -> Unit = {},
     initialPage: Int = 0,
     artwork: Paintable? = rememberWatchArtwork(playing?.cover),
     mode: WatchMode = WatchMode.WATCH,
@@ -123,7 +129,11 @@ internal fun WatchPager(
             HorizontalPager(state = pager) { page ->
                 when {
                     page == 0 -> WatchPlayer(playing, error, artwork, onPrevious, onToggle, onNext, volume, active = pager.currentPage == 0)
-                    mode == WatchMode.WATCH && page == 1 -> WatchLibrary(lists, onPlay, onRetry, extensionsNote, onSyncExtensions)
+                    mode == WatchMode.WATCH && page == 1 -> {
+                        val opened = openList
+                        if (opened != null) WatchPlaylist(opened, openTracks, onCloseList, onPlayList, onPlayTrack, onRetryTracks)
+                        else WatchLibrary(lists, onOpen, onRetry, extensionsNote, onSyncExtensions)
+                    }
                     else -> WatchModePage(mode, onModeChange, updateAuto, onUpdateAutoChange, updateChecking, updateMessage, updateIsError, updateLastChecked, onCheckUpdates)
                 }
             }
@@ -400,7 +410,7 @@ private fun WatchPlaying?.position(): TrackPositionUiModel = when {
 @Composable
 internal fun WatchLibrary(
     lists: Result<List<WatchList>>?,
-    onPlay: (WatchList) -> Unit,
+    onOpen: (WatchList) -> Unit,
     onRetry: () -> Unit,
     extensionsNote: String,
     onSyncExtensions: () -> Unit,
@@ -435,7 +445,7 @@ internal fun WatchLibrary(
                 }
                 else -> items(lists.getOrThrow(), key = { it.uri }) { list ->
                     Button(
-                        onClick = { onPlay(list) }, colors = ButtonDefaults.filledTonalButtonColors(),
+                        onClick = { onOpen(list) }, colors = ButtonDefaults.filledTonalButtonColors(),
                         icon = { Icon(WatchIcons.QueueMusic, contentDescription = null) },
                         secondaryLabel = list.subtitle.takeIf { it.isNotBlank() }?.let { s -> { Text(s, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
                         modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
@@ -450,6 +460,85 @@ internal fun WatchLibrary(
                     secondaryLabel = { Text(extensionsNote, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                     modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
                 ) { Text(stringResource(R.string.wear_extensions_sync), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+        }
+    }
+}
+
+/**
+ * One list, opened from the library (v19: a tap on a list used to start it playing at
+ * once; now the tap opens it, and playing is the Play button's job — the whole list from
+ * its first song an extension has — or a song's own tap, which plays the list from that
+ * song). Songs that are files of the phone are marked as such; the watch cannot play
+ * them (Phone mode plays them there).
+ */
+@Composable
+internal fun WatchPlaylist(
+    list: WatchList,
+    tracks: Result<List<WatchTrack>>?,
+    onBack: () -> Unit,
+    onPlayList: (WatchList) -> Unit,
+    onPlayTrack: (Int) -> Unit,
+    onRetry: () -> Unit,
+) {
+    val state = rememberTransformingLazyColumnState()
+    val spec = rememberTransformationSpec()
+    ScreenScaffold(scrollState = state) { padding ->
+        TransformingLazyColumn(state = state, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
+            item {
+                ListHeader(Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec)) {
+                    Text(list.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            item {
+                Button(
+                    onClick = onBack, colors = ButtonDefaults.filledVariantButtonColors(),
+                    modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
+                ) { Text(stringResource(R.string.wear_back), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+            item {
+                Button(
+                    onClick = { onPlayList(list) }, colors = ButtonDefaults.buttonColors(),
+                    secondaryLabel = list.subtitle.takeIf { it.isNotBlank() }?.let { s -> { Text(s, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
+                    modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
+                ) { Text(stringResource(R.string.wear_play), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+            when {
+                tracks == null -> item {
+                    Text(stringResource(R.string.wear_loading), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                tracks.isFailure -> {
+                    item {
+                        Text(
+                            stringResource(R.string.wear_no_phone), textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().transformedHeight(this, spec),
+                        )
+                    }
+                    item {
+                        Button(
+                            onClick = onRetry, colors = ButtonDefaults.filledTonalButtonColors(),
+                            icon = { Icon(Icons.Rounded.Refresh, contentDescription = null) },
+                            modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
+                        ) { Text(stringResource(R.string.wear_retry)) }
+                    }
+                }
+                else -> {
+                    val songs = tracks.getOrThrow()
+                    items(songs.size) { i ->
+                        val track = songs[i]
+                        Button(
+                            onClick = { onPlayTrack(i) }, colors = ButtonDefaults.filledTonalButtonColors(),
+                            secondaryLabel = {
+                                Text(
+                                    if (track.phoneOnly) stringResource(R.string.wear_on_phone)
+                                    else track.artists.joinToString(", "),
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
+                        ) { Text(track.name, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                    }
+                }
             }
         }
     }
