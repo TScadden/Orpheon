@@ -11,10 +11,10 @@ android {
     compileSdk = 37
 
     // Scadify's own numbering, as the phone's app: the default is the current shipped build's
-    // number ("17" = v17, versionCode 200 + the number), bumped with every shipped version.
+    // number ("18" = v18, versionCode 200 + the number), bumped with every shipped version.
     // The in-app updater compares versionNames numerically and requires the release's APK
     // to carry the release's number, so bump both defaults with every shipped version.
-    val version = (findProperty("appVersionName") as String?) ?: "17"
+    val version = (findProperty("appVersionName") as String?) ?: "18"
     val beta = findProperty("appVersionName") == null || version.contains("-beta")
     // As the phone's app (base/app): -Pclean is the shipped channel, its own app (id suffix .clean).
     val cleanApp = findProperty("clean") != null
@@ -23,7 +23,7 @@ android {
         applicationId = if (beta) "app.orpheon.beta" else "app.orpheon"
         minSdk = 30
         targetSdk = 36
-        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 217
+        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 218
         versionName = version
         // GitHub "owner/repo" whose releases the watch app checks for updates; empty = off
         // (local builds). The shipped (clean) debug build sets its own repo below: the
@@ -53,10 +53,21 @@ android {
             buildConfigField("String", "UPDATE_REPO", "\"${if (cleanApp) "TScadden/scadify-wear-releases" else ""}\"")
         }
         release {
+            // Scadify v18: the shipped watch app is this release build (CI builds it with
+            // -Pclean), so it takes the shipped channel's id suffix, the same as the debug
+            // build above — without it the APK would carry another app's id and neither
+            // install over the shipped app nor pass its updater's checks.
+            if (cleanApp) applicationIdSuffix = ".clean"
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // The phone's release key in CI (the two apps must be signed alike); the debug key locally.
-            signingConfig = signingConfigs.getByName("debug")
+            // Scadify: the same committed keystore as every shipped build (stableDebug is
+            // base/debug.keystore), never a CI runner's own debug key — the watch updater
+            // verifies the signing certificate before it installs an update.
+            signingConfig = signingConfigs.getByName("stableDebug")
+            // As the debug build: the shipped (clean) build's update check is live and
+            // reads the watch's own releases repo; other release builds stay off.
+            buildConfigField("String", "UPDATE_REPO", "\"${if (cleanApp) "TScadden/scadify-wear-releases" else ""}\"")
         }
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -97,6 +108,9 @@ dependencies {
     implementation("com.google.android.horologist:horologist-audio-ui-material3:0.8.4-alpha")
     implementation("com.google.android.horologist:horologist-compose-layout:0.8.4-alpha")
     implementation("com.google.android.horologist:horologist-images-coil:0.8.4-alpha")
+    // Coil itself, named directly: the player asks for its sleeve at the watch's screen
+    // size (WatchScreens.watchArtwork), which takes a sized ImageRequest, not just a URL.
+    implementation("io.coil-kt:coil-compose:2.7.0")
     // Refresh only; the two other icons are drawn in WatchIcons (the extended set is ~60 MB).
     implementation("androidx.compose.material:material-icons-core:1.7.8")
 

@@ -21,7 +21,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.google.android.horologist.audio.ui.VolumeUiState
 import com.google.android.horologist.images.base.paintable.BitmapPaintable
-import com.google.android.horologist.images.coil.CoilPaintable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
@@ -98,7 +97,7 @@ internal fun WatchApp() {
     }
     val artwork = remember(mode, phoneArt, playing?.cover) {
         if (mode == WatchMode.PHONE && phoneArt != null) BitmapPaintable(phoneArt)
-        else playing?.cover?.let { CoilPaintable(it) }
+        else playing?.cover?.let { watchArtwork(context, it) }
     }
     var attempt by remember { mutableStateOf(0) }
     // null: being read; a failure: the phone is not there.

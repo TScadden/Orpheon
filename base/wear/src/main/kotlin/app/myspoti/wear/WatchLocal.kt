@@ -8,6 +8,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.dash.DashMediaSource
 import androidx.media3.exoplayer.source.MediaSource
@@ -54,7 +55,9 @@ object WatchLocal {
         load(first, positionMs)
     }
 
-    private fun ensurePlayer(): ExoPlayer = player ?: ExoPlayer.Builder(app).build().also { p ->
+    private fun ensurePlayer(): ExoPlayer = player ?: ExoPlayer.Builder(app)
+        .setLoadControl(WatchBuffering.loadControl())
+        .build().also { p ->
         // Music, as media: the attributes are what route the sound to a Bluetooth car kit paired
         // to the watch (and give the player audio focus like any media app).
         p.setAudioAttributes(
@@ -200,3 +203,25 @@ object WatchLocal {
 
 /** Where the watch's song is: position, length, and whether it waits for data. */
 data class WatchPosition(val positionMs: Long, val durationMs: Long, val buffering: Boolean)
+
+/**
+ * The watch player's buffering (Scadify v18). The player streams each song straight from
+ * the network over the watch's own link, and with the media3 defaults it played
+ * hand-to-mouth — the media session showed a buffered position of 0 with the playhead
+ * frozen, so every dip in the stream reached the speaker as a cut-out. The watch player
+ * therefore banks well ahead: it keeps loading until [MAX_BUFFER_MS] of audio is ahead
+ * of the playhead, and after a stall it waits until [BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS]
+ * is banked again before resuming, instead of resuming on the first trickle and stalling
+ * again at once. Starting stays quick ([BUFFER_FOR_PLAYBACK_MS]).
+ */
+internal object WatchBuffering {
+    const val MIN_BUFFER_MS = 30_000
+    const val MAX_BUFFER_MS = 60_000
+    const val BUFFER_FOR_PLAYBACK_MS = 2_500
+    const val BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 15_000
+
+    fun loadControl(): DefaultLoadControl = DefaultLoadControl.Builder()
+        .setBufferDurationsMs(MIN_BUFFER_MS, MAX_BUFFER_MS, BUFFER_FOR_PLAYBACK_MS, BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS)
+        .setPrioritizeTimeOverSizeThresholds(true)
+        .build()
+}
