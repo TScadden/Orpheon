@@ -59,9 +59,9 @@ class Api constructor(
 
     private fun stableId(key: String): Int = key.hashCode() and 0x7fffffff
 
-    /** Imported playlists whose stored songs' ISRC backfill has been attempted this run. */
-    private val isrcBackfillAttempted = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-    private val isrcBackfillScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+    /** Imported playlists whose stored songs' repair has been attempted this run. */
+    private val importRepairAttempted = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val importRepairScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
 
     /** Process-level caches: screens show the last result at once, then refresh. */
     companion object HomeCache {
@@ -1013,7 +1013,7 @@ class Api constructor(
     fun getImportedPlaylistPage(id: String): Flow<Response<ContextPageModel>> = flow {
         val p = ImportedPlaylists.get(id)
         if (p == null) { emit(Response.Error(context.getString(R.string.imported_playlist_gone))); return@flow }
-        maybeBackfillIsrcs(p)
+        maybeRepairImported(p)
         emit(Response.Success(ContextPageModel(
             uri = "scadify:imported:$id",
             type = "imported",
@@ -1028,23 +1028,32 @@ class Api constructor(
     }
 
     /**
-     * A playlist imported before imports kept ISRCs has none stored: its songs then match
-     * sources the slow way — a live lookup that cannot answer for a bare Spotify id in the
-     * accountless chain, so they can fail to play or download at all. The store kept the
+     * A playlist imported before imports kept the full reading has thin rows stored: the
+     * embed page's songs carry no ISRC, no cover and no album name. Without an ISRC its
+     * songs then match sources the slow way — a live lookup that cannot answer for a bare
+     * Spotify id in the accountless chain, so they can fail to play or download at all —
+     * and without covers and album names the list reads as broken. The store kept the
      * playlist's source link, so when such a playlist is opened it is re-read once, in the
-     * background, and the ISRCs the fresh reading states are filled in. Once per playlist
-     * per run, off the page's own path; any failure leaves the songs exactly as they are.
+     * background, the same merged reading an import makes, and every field the stored
+     * songs lack is filled from it (ImportedPlaylists.repair). A song that gains its ISRC
+     * also sheds a failed download from before the repair: that failure was the missing
+     * ISRC's, not the sources', so its badge clears for a fresh attempt. Once per playlist
+     * per run, off the page's own path; a failed re-read leaves everything exactly as it
+     * is, and a later run may try again.
      */
-    private fun maybeBackfillIsrcs(p: ImportedPlaylist) {
-        if (p.items.none { it.isrc.isBlank() && it.spotifyTrackId.isNotBlank() }) return
+    private fun maybeRepairImported(p: ImportedPlaylist) {
+        if (p.items.none { it.spotifyTrackId.isNotBlank() && (it.isrc.isBlank() || it.coverUrl.isBlank() || it.album.isBlank()) }) return
         val link = PlaylistLinks.parse(p.sourceUrl) as? PlaylistLink.Spotify ?: return
-        if (!isrcBackfillAttempted.add(p.id)) return
-        isrcBackfillScope.launch {
+        if (!importRepairAttempted.add(p.id)) return
+        importRepairScope.launch {
             runCatching {
                 val fresh = PlaylistImport.fetchSpotify(link.id)
-                val byId = fresh.songs.mapNotNull { s -> s.isrc.takeIf { it.isNotBlank() }?.let { s.spotifyTrackId to it } }.toMap()
-                if (byId.isNotEmpty()) ImportedPlaylists.fillIsrcs(p.id, byId)
-            }.onFailure { if (it !is CancellationException) Log.w("Api", "ISRC backfill for ${p.name}: $it") }
+                val byId = fresh.songs.filter { it.spotifyTrackId.isNotBlank() }.associateBy { it.spotifyTrackId }
+                if (byId.isNotEmpty()) {
+                    val resolvable = ImportedPlaylists.repair(p.id, byId)
+                    resolvable.forEach { com.music.spotui.data.offline.OfflineDownloader.forgetFailed(it) }
+                }
+            }.onFailure { if (it !is CancellationException) Log.w("Api", "Imported playlist repair for ${p.name}: $it") }
         }
     }
 
