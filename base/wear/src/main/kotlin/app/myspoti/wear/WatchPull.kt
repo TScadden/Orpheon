@@ -3,7 +3,6 @@ package app.myspoti.wear
 import android.content.Context
 import android.net.Uri
 import android.util.Log
-import androidx.media3.common.C
 import androidx.media3.datasource.BaseDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
@@ -108,7 +107,7 @@ class PullBuffer private constructor(
     fun openLength(position: Long): Long = when {
         expectedSize > 0 -> maxOf(0L, expectedSize - position)
         done -> maxOf(0L, written - position)
-        else -> C.LENGTH_UNSET
+        else -> -1L // C.LENGTH_UNSET: the length is not known yet
     }
 
     companion object {
