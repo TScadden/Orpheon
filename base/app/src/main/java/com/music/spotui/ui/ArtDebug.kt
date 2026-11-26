@@ -84,6 +84,15 @@ internal fun buildArtDebugReport(
     }
 }.trimEnd()
 
+private fun fileAddressPath(address: String): String? {
+    var rest = address.removePrefix("file:")
+    if (rest.startsWith("//")) {
+        val pathStart = rest.indexOf('/', 2)
+        rest = if (pathStart >= 0) rest.substring(pathStart) else ""
+    }
+    return Uri.decode(rest).takeIf { it.isNotBlank() }
+}
+
 internal suspend fun probeArtAddress(context: Context, address: String?): String = withContext(Dispatchers.IO) {
     when {
         address.isNullOrBlank() -> "unprobed"
@@ -94,8 +103,8 @@ internal suspend fun probeArtAddress(context: Context, address: String?): String
                 if (input.read() == -1) "OK (stream opened; no bytes)" else "OK"
             } ?: "FAIL (openInputStream returned null)"
         }.getOrElse { error -> "FAIL (${error.javaClass.simpleName}: ${error.message ?: "no message"})" }
-        address.startsWith("file://") -> runCatching {
-            val path = Uri.parse(address).path
+        address.startsWith("file:") -> runCatching {
+            val path = fileAddressPath(address)
             if (path.isNullOrBlank()) "FAIL (file URI has no path)" else "File.exists() = ${File(path).exists()}"
         }.getOrElse { error -> "FAIL (${error.javaClass.simpleName}: ${error.message ?: "no message"})" }
         !address.contains("://") -> runCatching { "File.exists() = ${File(address).exists()}" }
