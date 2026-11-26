@@ -7,6 +7,25 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OfflineDownloaderTest {
+    @Test fun aRepairedSongsFailedDownloadIsForgottenButNothingElseIs() {
+        // The playlist repair gained this song its ISRC: its earlier failure was the
+        // missing ISRC's, so the failure is forgotten — badge and retry request gone,
+        // back to plain not-downloaded. A download still in flight is not a failure
+        // and is left exactly as it is.
+        OfflineDownloader.requests["AAA"] = OfflineDownloader.Request(
+            trackId = "AAA", title = "One", artist = "Artist A", album = "Alb",
+            albumId = "", durationMs = 201_000L, coverUrl = "",
+        )
+        OfflineStore.status["AAA"] = OfflineStatus.Failed
+        OfflineStore.status["BBB"] = OfflineStatus.Downloading(-1f)
+        OfflineDownloader.forgetFailed("AAA")
+        assertNull(OfflineStore.status["AAA"])
+        assertNull(OfflineDownloader.requests["AAA"])
+        OfflineDownloader.forgetFailed("BBB")
+        assertEquals(OfflineStatus.Downloading(-1f), OfflineStore.status["BBB"])
+        OfflineStore.status.remove("BBB")
+    }
+
     @Test fun aDownloadRequestKeepsItsIsrcAsText() {
         val r = OfflineDownloader.Request(
             trackId = "AAA", title = "One", artist = "Artist A", album = "Alb",

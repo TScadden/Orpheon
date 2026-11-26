@@ -127,23 +127,37 @@ object ImportedPlaylists {
         update { playlists[id]?.let { playlists[id] = it.copy(items = it.items.filterNot { s -> s.key == key }) } }
 
     /**
-     * Fills the ISRCs of a stored playlist's songs from [isrcByTrackId] (Spotify track id →
-     * ISRC): only songs that have none are filled — a song that already carries one keeps
-     * it, and a song the map does not know is left as it is. For playlists imported before
-     * imports kept ISRCs (see Api's backfill on the playlist page). How many were filled.
+     * Repairs a stored playlist's songs from a fresh reading of its source, [freshByTrackId]
+     * (Spotify track id → the fresh reading's song of it): the ISRC, the cover and the album
+     * name are filled wherever the stored song lacks them — a field the stored song already
+     * carries is never overwritten, a song the reading does not know is left as it is, and
+     * the list itself never changes (no song added, taken out or moved). For playlists
+     * imported before imports kept the full reading — the embed page's rows carry no ISRC,
+     * no cover and no album (see Api's repair on the playlist page). Returns the Spotify
+     * track ids whose ISRC this pass filled: the songs that could not be matched to a
+     * source before and can be now.
      */
-    fun fillIsrcs(id: String, isrcByTrackId: Map<String, String>): Int {
-        var filled = 0
+    fun repair(id: String, freshByTrackId: Map<String, ImportedSong>): Set<String> {
+        val isrcFilled = LinkedHashSet<String>()
         update {
             playlists[id]?.let { p ->
+                var changed = false
                 val items = p.items.map { s ->
-                    val found = isrcByTrackId[s.spotifyTrackId]?.takeIf { it.isNotBlank() }
-                    if (s.isrc.isBlank() && found != null) { filled++; s.copy(isrc = found) } else s
+                    val fresh = freshByTrackId[s.spotifyTrackId]?.takeIf { s.spotifyTrackId.isNotBlank() } ?: return@map s
+                    val isrc = if (s.isrc.isBlank()) fresh.isrc else s.isrc
+                    val cover = if (s.coverUrl.isBlank()) fresh.coverUrl else s.coverUrl
+                    val album = if (s.album.isBlank()) fresh.album else s.album
+                    if (isrc == s.isrc && cover == s.coverUrl && album == s.album) s
+                    else {
+                        changed = true
+                        if (s.isrc.isBlank() && isrc.isNotBlank()) isrcFilled += s.spotifyTrackId
+                        s.copy(isrc = isrc, coverUrl = cover, album = album)
+                    }
                 }
-                if (filled > 0) playlists[id] = p.copy(items = items)
+                if (changed) playlists[id] = p.copy(items = items)
             }
         }
-        return filled
+        return isrcFilled
     }
 
     private fun update(change: () -> Unit) {

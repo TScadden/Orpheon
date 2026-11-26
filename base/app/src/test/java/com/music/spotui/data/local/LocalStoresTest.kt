@@ -89,28 +89,62 @@ class LocalStoresTest {
         ImportedPlaylists.delete("old1")
     }
 
-    @Test fun storedIsrcsAreFilledWithoutTouchingTheOnesAlreadyThere() {
-        // The backfill for playlists imported before ISRCs were kept: blanks are filled
-        // from the fresh reading, a song that already carries one keeps it, and a song
-        // the reading does not know stays blank.
-        val p = ImportedPlaylists.create("Backfill", "https://open.spotify.com/playlist/bf", listOf(
-            ImportedSong("", "AAA", "One", "Artist A", "Alb", 201_000L, ""),
+    @Test fun storedSongsAreRepairedWithoutTouchingWhatTheyAlreadyCarry() {
+        // The repair for playlists imported before imports kept the full reading (the
+        // embed page's rows: no ISRC, no cover, no album): blanks are filled from the
+        // fresh reading, a field a song already carries is never overwritten, a song
+        // the reading does not know is left as it is, and the list itself never changes.
+        val p = ImportedPlaylists.create("Repair", "https://open.spotify.com/playlist/bf", listOf(
+            ImportedSong("", "AAA", "One", "Artist A", "", 201_000L, ""),
             ImportedSong("", "BBB", "Two", "Artist B", "Other", 182_000L, "", "USS1Z2500002"),
-            ImportedSong("", "CCC", "Three", "Artist C", "Third", 100_000L, ""),
+            ImportedSong("", "CCC", "Three", "Artist C", "Third", 100_000L, "https://img/own", "USS1Z2500004"),
         ))
-        val filled = ImportedPlaylists.fillIsrcs(p.id, mapOf(
-            "AAA" to "USS1Z2500001", "BBB" to "USXXX2500099", "ZZZ" to "USS1Z2500099",
+        val isrcFilled = ImportedPlaylists.repair(p.id, mapOf(
+            "AAA" to ImportedSong("", "AAA", "One", "Artist A", "Alb", 201_000L, "https://img/1", "USS1Z2500001"),
+            "BBB" to ImportedSong("", "BBB", "Two", "Artist B", "Other (Deluxe)", 182_000L, "https://img/2", "USXXX2500099"),
+            "CCC" to ImportedSong("", "CCC", "Three", "Artist C", "Third (Remaster)", 100_000L, "https://img/3", "USS1Z2500003"),
+            "ZZZ" to ImportedSong("", "ZZZ", "Unknown", "Artist Z", "Nope", 90_000L, "https://img/z", "USS1Z2500099"),
         ))
-        assertEquals(1, filled)
+        // Only AAA gained an ISRC: BBB and CCC already carried their own (and keep them,
+        // with their own album names and CCC's own cover), and ZZZ is not a song of this
+        // playlist, so it is not added.
+        assertEquals(setOf("AAA"), isrcFilled)
         val after = ImportedPlaylists.playlists.getValue(p.id)
+        assertEquals(3, after.items.size)
+        assertEquals(listOf("AAA", "BBB", "CCC"), after.items.map { it.spotifyTrackId })
         assertEquals("USS1Z2500001", after.items[0].isrc)
+        assertEquals("https://img/1", after.items[0].coverUrl)
+        assertEquals("Alb", after.items[0].album)
         assertEquals("USS1Z2500002", after.items[1].isrc)
-        assertEquals("", after.items[2].isrc)
-        // And what was filled is what a restart reads back.
+        assertEquals("https://img/2", after.items[1].coverUrl)
+        assertEquals("Other", after.items[1].album)
+        assertEquals("USS1Z2500004", after.items[2].isrc)
+        assertEquals("https://img/own", after.items[2].coverUrl)
+        assertEquals("Third", after.items[2].album)
+        // And what was repaired is what a restart reads back.
         val text = ImportedPlaylists.write()
         ImportedPlaylists.playlists.clear()
         ImportedPlaylists.read(text)
-        assertEquals("USS1Z2500001", ImportedPlaylists.playlists.getValue(p.id).items[0].isrc)
+        val again = ImportedPlaylists.playlists.getValue(p.id)
+        assertEquals("USS1Z2500001", again.items[0].isrc)
+        assertEquals("https://img/1", again.items[0].coverUrl)
+        assertEquals("Alb", again.items[0].album)
+        ImportedPlaylists.delete(p.id)
+    }
+
+    @Test fun aRepairWithNothingFreshChangesNothing() {
+        // The failed re-read's shape at the store: no fresh songs (or none that match),
+        // so nothing is filled, nothing is reported repaired, and the stored list is
+        // byte-for-byte the list that was there.
+        val p = ImportedPlaylists.create("NoFresh", "https://open.spotify.com/playlist/nf", listOf(
+            ImportedSong("", "AAA", "One", "Artist A", "", 201_000L, ""),
+        ))
+        val before = ImportedPlaylists.write()
+        assertEquals(emptySet<String>(), ImportedPlaylists.repair(p.id, emptyMap()))
+        assertEquals(emptySet<String>(), ImportedPlaylists.repair(p.id, mapOf(
+            "ZZZ" to ImportedSong("", "ZZZ", "Unknown", "Artist Z", "Nope", 90_000L, "https://img/z", "USS1Z2500099"),
+        )))
+        assertEquals(before, ImportedPlaylists.write())
         ImportedPlaylists.delete(p.id)
     }
 
