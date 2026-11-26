@@ -65,6 +65,89 @@ class AmazonPlaylistReaderTest {
         assertTrue(AmazonDom.looksBlocked("<html><body><form action=\"/errors/validateCaptcha\">captcha</form></body></html>"))
     }
 
+    @Test fun wallsAreClassifiedCaptchaSignInOrNeither() {
+        assertEquals(
+            AmazonWall.CAPTCHA,
+            AmazonDom.wallOf("<html><body><h1>Robot Check</h1>Enter the characters you see below</body></html>"),
+        )
+        // A sign-in gate: Amazon's own sign-in address and its call to sign in, no rows.
+        val gate = "<html><head><title>Amazon Music</title></head><body>" +
+            "<p>Sign in to listen to this playlist</p>" +
+            "<a href=\"https://www.amazon.com/ap/signin?openid.return_to=https://music.amazon.com/\">Sign in</a>" +
+            "</body></html>"
+        assertEquals(AmazonWall.SIGN_IN, AmazonDom.wallOf(gate))
+        assertFalse(AmazonDom.looksBlocked(gate))
+        // A bare shell and a real playlist page are neither wall.
+        assertEquals(AmazonWall.NONE, AmazonDom.wallOf("<html><body>Tuning in…</body></html>"))
+        assertEquals(AmazonWall.NONE, AmazonDom.wallOf(fixture("playlist.html")))
+    }
+
+    @Test fun rowElementsReadWhenNoLinkCarriesATrackAsin() {
+        val page = AmazonDom.parse(fixture("playlist_rows.html"))
+        assertEquals("Night Drive", page.name)
+        // The third row never rendered an artist: not a song the import may claim.
+        assertEquals(2, page.rows.size)
+
+        val first = page.rows[0]
+        assertEquals("Glass Horizon", first.title)
+        assertEquals("Velvet Static", first.artist)
+        assertEquals("Afterglow", first.album)
+        assertEquals(221_000L, first.durationMs)
+        assertEquals("B0FALL0001", first.asin)
+        assertEquals("https://m.media-amazon.com/images/I/61fall1.jpg", first.coverUrl)
+
+        val second = page.rows[1]
+        assertEquals("Low Country", second.title)
+        assertEquals("Mara Quinn", second.artist)
+        assertEquals("Field Notes", second.album)
+        assertEquals(178_000L, second.durationMs)
+        assertEquals("", second.asin)
+    }
+
+    @Test fun runJsAnswersOrTimesOutButNeverHangs() = runBlocking {
+        // A page that answers: its value comes back.
+        val answering = JsEvaluator { _, callback -> callback("rows") }
+        assertEquals("rows", runJs(answering, "script", 1_000))
+        // A page that never answers (busy, navigated, a script that threw): the
+        // deadline answers instead — null, in bounded time.
+        val silent = JsEvaluator { _, _ -> }
+        assertEquals(null, runJs(silent, "script", 150))
+        // A page whose evaluation itself blows up reads as no answer too.
+        val throwing = JsEvaluator { _, _ -> throw IllegalStateException("gone") }
+        assertEquals(null, runJs(throwing, "script", 1_000))
+    }
+
+    private fun readout(
+        wall: AmazonWall = AmazonWall.NONE, htmlBytes: Int? = 1,
+    ) = AmazonReadout(
+        url = "https://music.amazon.com/user-playlists/ABC", pageTitle = "Amazon Music",
+        pageUrl = "https://music.amazon.com/user-playlists/ABC",
+        htmlBytes = htmlBytes, rowsFound = 0, wall = wall,
+        loadOutcome = "finished", lastPoll = "poll 20: 0 rows",
+    )
+
+    @Test fun theReadoutNamesWhatThePageWas() {
+        val text = readout(wall = AmazonWall.SIGN_IN, htmlBytes = null).text()
+        assertTrue(text.contains("page title: Amazon Music"))
+        assertTrue(text.contains("html size: unreadable"))
+        assertTrue(text.contains("rows found: 0"))
+        assertTrue(text.contains("wall: sign-in"))
+        assertTrue(text.contains("last poll: poll 20: 0 rows"))
+        // The other walls name themselves too, and a read page gives its size.
+        assertTrue(readout(wall = AmazonWall.NONE).text().contains("wall: neither"))
+        assertTrue(readout(wall = AmazonWall.CAPTCHA).text().contains("wall: captcha"))
+        assertTrue(readout(htmlBytes = 12_345).text().contains("html size: 12345 bytes"))
+    }
+
+    @Test fun statusStagesFollowTheReadsFacts() {
+        assertEquals(AmazonStage.WAITING_FOR_LIST, amazonPollStage(0, 0))
+        assertEquals(AmazonStage.COLLECTING, amazonPollStage(3, 10))
+        assertEquals(AmazonStage.FOUND_SONGS, amazonPollStage(10, 10))
+        assertEquals(AmazonStage.NEEDS_CAPTCHA, amazonWallStage(AmazonWall.CAPTCHA))
+        assertEquals(AmazonStage.NEEDS_SIGN_IN, amazonWallStage(AmazonWall.SIGN_IN))
+        assertEquals(AmazonStage.WAITING_FOR_LIST, amazonWallStage(AmazonWall.NONE))
+    }
+
     private fun row(asin: String, title: String, artist: String, album: String = "", cover: String = "") =
         ImportedSong("", "", title, artist, album, 100_000L, cover, asin = asin)
 

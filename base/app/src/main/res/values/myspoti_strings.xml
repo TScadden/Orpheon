@@ -73,6 +73,14 @@
     <string name="import_amazon_check_title">Amazon needs a quick check</string>
     <string name="import_amazon_check_body">Amazon is asking to confirm it\'s you. Tap through the check on the page below, then tap Continue.</string>
     <string name="import_amazon_continue">Continue</string>
+    <string name="import_amazon_status_loading">Loading Amazon\'s page…</string>
+    <string name="import_amazon_status_waiting">Waiting for the track list to appear…</string>
+    <string name="import_amazon_status_found">Found %1$d songs so far…</string>
+    <string name="import_amazon_status_collecting">Collecting songs… %1$d of %2$d</string>
+    <string name="import_amazon_signin_title">Amazon needs a sign-in</string>
+    <string name="import_amazon_signin_body">Amazon is asking for a sign-in before it shows this playlist — a playlist that is not public is only visible to its owner. Sign in on Amazon\'s page below (your password goes to Amazon, never to Scadify), then tap Continue.</string>
+    <string name="import_amazon_failed_title">That Amazon playlist didn\'t load</string>
+    <string name="import_amazon_csv_hint">Or export the playlist to a CSV file (Soundiiz and FreeYourMusic can do that) and use Import from a file.</string>
     <string name="import_file_button">Import from a file</string>
     <string name="import_file_bad">That file isn\'t a playlist export I can read. CSV files from Soundiiz, TuneMyMusic and FreeYourMusic work.</string>
     <string name="imported_playlist_subtitle_amazon">Imported from Amazon Music</string>

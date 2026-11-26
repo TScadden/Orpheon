@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!-- A rendered Amazon Music playlist page in the player's web-component shape:
+     rows are <music-track-row> elements and nothing links a song through
+     ?trackAsin= — the link reading finds nothing here. Title, artist, album and
+     duration are labelled spans, and a song's ASIN rides on its row. The third
+     row never rendered its artist, so it is not a song the import may claim. -->
+<html lang="en">
+<head>
+<title>Amazon Music: Night Drive</title>
+<meta property="og:title" content="Night Drive on Amazon Music">
+</head>
+<body>
+<music-detail-header>Night Drive</music-detail-header>
+<div class="tracklist">
+  <music-track-row data-asin="B0FALL0001">
+    <img src="https://m.media-amazon.com/images/I/61fall1.jpg" alt="">
+    <span class="track-title">Glass Horizon</span>
+    <a class="track-artist" href="/artists/B0ARTIST09">Velvet Static</a>
+    <span class="track-album">Afterglow</span>
+    <span class="track-duration">3:41</span>
+  </music-track-row>
+  <music-track-row>
+    <span class="track-title">Low Country</span>
+    <span class="track-artist">Mara Quinn</span>
+    <span class="track-album">Field Notes</span>
+    <span class="track-duration">2:58</span>
+  </music-track-row>
+  <music-track-row data-asin="B0FALL0003">
+    <span class="track-title">Half-Lit Road</span>
+    <span class="track-album">Ember Days</span>
+    <span class="track-duration">4:12</span>
+  </music-track-row>
+</div>
+</body>
+</html>

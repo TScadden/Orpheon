@@ -15,6 +15,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -81,6 +84,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -152,10 +156,11 @@ fun NameDialog(title: String, initial: String, confirm: String, onDismiss: () ->
 /**
  * "Import playlist": paste a public playlist link, read its songs, name the list, keep it on
  * this phone. Spotify links are read from Spotify's public pages (no account); an Amazon
- * Music link is read from Amazon's web player rendered on this phone (also no account —
- * see AmazonPlaylistReader), and a playlist file from a transfer service (Soundiiz,
- * TuneMyMusic, FreeYourMusic) can be picked instead — the route that also reaches
- * playlists no link can, Amazon's private ones included.
+ * Music link is read from Amazon's web player rendered on this phone, in a page the user
+ * watches — a public link reads signed out, and when Amazon gates the playlist behind a
+ * sign-in (a private one is invisible signed out) the user signs in on Amazon's own page
+ * first (see AmazonPlaylistReader). A playlist file from a transfer service (Soundiiz,
+ * TuneMyMusic, FreeYourMusic) can be picked instead.
  */
 @Composable
 fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
@@ -230,7 +235,9 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
         AmazonImportDialog(
             session = session,
             onImported = { imported -> amazon = null; complete(imported, session.url) },
-            onFailed = { amazon = null; busy = false; error = context.getString(R.string.import_amazon_failed) },
+            // No error text here: the Amazon dialog itself showed the read's failure
+            // readout (what the page actually was) before it was closed.
+            onFailed = { amazon = null; busy = false },
             onCancel = { amazon = null; busy = false },
         )
     }
@@ -295,9 +302,13 @@ private fun pickedFileName(context: android.content.Context, uri: android.net.Ur
 }
 
 /**
- * An Amazon link being read: the web player rendering in a token-size box while the
- * read runs, shown at a real size only when Amazon answers with a bot check for the
- * user to tap through (AmazonReadSession's NEEDS_USER), with Continue to resume it.
+ * An Amazon link being read: the web player at full size from the start, with the
+ * read's live status above it, so the user watches the same page the read reads.
+ * When Amazon answers with a wall a tap can clear — a bot check, or a sign-in gate
+ * (a playlist that is not public is invisible signed out) — the status says so and
+ * Continue resumes the read after the user clears it on Amazon's own page. A read
+ * that still fails ends here, showing its readout (what the page actually was),
+ * with the CSV route as a secondary line — not a guessed-at cause.
  */
 @Composable
 private fun AmazonImportDialog(
@@ -309,47 +320,100 @@ private fun AmazonImportDialog(
     androidx.compose.runtime.DisposableEffect(session) { onDispose { session.destroy() } }
     androidx.compose.runtime.LaunchedEffect(session) { session.run() }
     androidx.compose.runtime.LaunchedEffect(session.phase) {
-        when (session.phase) {
-            com.music.spotui.data.api.AmazonReadSession.Phase.DONE -> session.imported?.let(onImported)
-            com.music.spotui.data.api.AmazonReadSession.Phase.FAILED -> onFailed()
-            else -> Unit
+        if (session.phase == com.music.spotui.data.api.AmazonReadSession.Phase.DONE) {
+            session.imported?.let(onImported)
         }
     }
+    val failed = session.phase == com.music.spotui.data.api.AmazonReadSession.Phase.FAILED
     val needsUser = session.phase == com.music.spotui.data.api.AmazonReadSession.Phase.NEEDS_USER
+    val needsSignIn = needsUser && session.stage == com.music.spotui.data.api.AmazonStage.NEEDS_SIGN_IN
     AlertDialog(
         onDismissRequest = onCancel,
         containerColor = SheetColor,
         title = {
-            Text(stringResource(if (needsUser) R.string.import_amazon_check_title else R.string.import_title), color = AppText)
+            Text(
+                stringResource(
+                    when {
+                        failed -> R.string.import_amazon_failed_title
+                        needsSignIn -> R.string.import_amazon_signin_title
+                        needsUser -> R.string.import_amazon_check_title
+                        else -> R.string.import_title
+                    },
+                ),
+                color = AppText,
+            )
         },
         text = {
-            Column {
-                Text(
-                    stringResource(if (needsUser) R.string.import_amazon_check_body else R.string.import_amazon_reading),
-                    color = AppMuted, fontSize = 14.sp,
-                )
-                Box(
-                    Modifier.fillMaxWidth().padding(top = 12.dp)
-                        .height(if (needsUser) 420.dp else 1.dp)
-                        .clipToBounds(),
-                ) {
-                    androidx.compose.ui.viewinterop.AndroidView(
-                        factory = { session.webView },
-                        modifier = Modifier.fillMaxWidth().height(440.dp),
+            if (failed) {
+                Column {
+                    session.failureReadout?.let { readout ->
+                        SelectionContainer {
+                            Text(
+                                readout.text(),
+                                color = AppText, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp)
+                                    .verticalScroll(rememberScrollState()),
+                            )
+                        }
+                    }
+                    Text(
+                        stringResource(R.string.import_amazon_csv_hint),
+                        color = AppMuted, fontSize = 13.sp,
+                        modifier = Modifier.padding(top = 10.dp),
                     )
+                }
+            } else {
+                Column {
+                    Text(amazonStatusText(session), color = AppMuted, fontSize = 14.sp)
+                    Box(
+                        Modifier.fillMaxWidth().padding(top = 12.dp)
+                            .height(420.dp)
+                            .clipToBounds(),
+                    ) {
+                        androidx.compose.ui.viewinterop.AndroidView(
+                            factory = { session.webView },
+                            modifier = Modifier.fillMaxWidth().height(440.dp),
+                        )
+                    }
                 }
             }
         },
         confirmButton = {
-            if (needsUser) TextButton(onClick = { session.userContinue() }) {
-                Text(stringResource(R.string.import_amazon_continue), color = Green)
+            when {
+                failed -> TextButton(onClick = onFailed) {
+                    Text(stringResource(R.string.lbl_close), color = Green)
+                }
+                needsUser -> TextButton(onClick = { session.userContinue() }) {
+                    Text(stringResource(R.string.import_amazon_continue), color = Green)
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onCancel) { Text(stringResource(R.string.lbl_cancel), color = AppText) }
+            if (!failed) TextButton(onClick = onCancel) { Text(stringResource(R.string.lbl_cancel), color = AppText) }
         },
     )
 }
+
+/** The status line over the reading page, from the read's own stage and counts. */
+@Composable
+private fun amazonStatusText(session: com.music.spotui.data.api.AmazonReadSession): String =
+    when (session.stage) {
+        com.music.spotui.data.api.AmazonStage.LOADING_PAGE ->
+            stringResource(R.string.import_amazon_status_loading)
+        com.music.spotui.data.api.AmazonStage.WAITING_FOR_LIST ->
+            stringResource(R.string.import_amazon_status_waiting)
+        com.music.spotui.data.api.AmazonStage.FOUND_SONGS ->
+            stringResource(R.string.import_amazon_status_found, session.foundCount)
+        com.music.spotui.data.api.AmazonStage.COLLECTING ->
+            stringResource(R.string.import_amazon_status_collecting, session.foundCount, session.declaredTotal)
+        com.music.spotui.data.api.AmazonStage.NEEDS_CAPTCHA ->
+            stringResource(R.string.import_amazon_check_body)
+        com.music.spotui.data.api.AmazonStage.NEEDS_SIGN_IN ->
+            stringResource(R.string.import_amazon_signin_body)
+        com.music.spotui.data.api.AmazonStage.DONE ->
+            stringResource(R.string.import_amazon_status_found, session.foundCount)
+        com.music.spotui.data.api.AmazonStage.FAILED -> ""
+    }
 
 @Composable
 private fun SheetRow(icon: ImageVector, label: String, detail: String? = null, onClick: () -> Unit) {
