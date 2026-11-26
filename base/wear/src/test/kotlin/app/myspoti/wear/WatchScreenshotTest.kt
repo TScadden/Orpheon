@@ -65,7 +65,7 @@ abstract class WatchScreenshotTest(private val size: String) {
                         playing = playing.takeUnless { idle }, error = if (idle) "player: no audio for this song" else null,
                         onPrevious = {}, onToggle = {}, onNext = {},
                         volume = WatchVolumeUi({ VolumeUiState(6, 10) }, kotlinx.coroutines.flow.emptyFlow(), {}, {}),
-                        lists = if (idle) Result.failure(IllegalStateException("no phone")) else Result.success(lists), onPlay = {}, onRetry = {},
+                        lists = if (idle) Result.failure(IllegalStateException("no phone")) else Result.success(lists), onOpen = {}, onRetry = {},
                         extensionsNote = if (idle) "0 on the watch" else "2 on the watch", onSyncExtensions = {},
                         initialPage = page, artwork = if (idle) null else BitmapPaintable(cover()),
                     )

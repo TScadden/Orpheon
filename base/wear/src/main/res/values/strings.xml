@@ -12,6 +12,8 @@
     <string name="wear_loading">Loading…</string>
     <string name="wear_nothing_playing">Nothing playing</string>
     <string name="wear_library">Your music</string>
+    <string name="wear_back">Back</string>
+    <string name="wear_phone_only_one">This song lives on your phone — play it in Phone mode.</string>
     <string name="wear_retry">Try again</string>
     <string name="wear_failed">That did not work: %1$s</string>
     <string name="wear_playing_channel">Playback</string>

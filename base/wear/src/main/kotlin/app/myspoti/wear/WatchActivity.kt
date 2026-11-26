@@ -27,10 +27,11 @@ import kotlinx.coroutines.launch
 
 /**
  * The watch's pages: what plays (its name, its artists, previous, play or pause, next, the
- * volume), then, a swipe away, the playlists as the phone lists them — a tap plays one on the
- * watch from its own extensions ([WatchPlay]) — and the mode switch. Two modes ([WatchModes]):
- * Phone, where the player page mirrors the phone's song and its buttons drive the phone's
- * player; Watch, where the watch plays on its own.
+ * volume), then, a swipe away, the playlists as the phone lists them — a tap opens one, and
+ * its Play button or a song's tap plays it on the watch from its own extensions
+ * ([WatchPlay]) — and the mode switch. Two modes ([WatchModes]): Phone, where the player
+ * page mirrors the phone's song and its buttons drive the phone's player; Watch, where the
+ * watch plays on its own. (The library is a Watch-mode page; Phone mode has none.)
  */
 class WatchActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -102,6 +103,14 @@ internal fun WatchApp() {
     var attempt by remember { mutableStateOf(0) }
     // null: being read; a failure: the phone is not there.
     val lists by produceState<Result<List<WatchList>>?>(null, attempt) { value = runCatching { PhoneLink(app).library() } }
+    // The list opened from the library (v19: a tap opens it instead of playing it) and its
+    // songs, read from the phone (the last ones read when it is not there).
+    var openList by remember { mutableStateOf<WatchList?>(null) }
+    var tracksAttempt by remember { mutableStateOf(0) }
+    val openTracks by produceState<Result<List<WatchTrack>>?>(null, openList, tracksAttempt) {
+        value = openList?.let { runCatching { PhoneLink(app).tracks(it.uri) } }
+    }
+    LaunchedEffect(mode) { if (mode != WatchMode.WATCH) openList = null }
 
     // The watch app's own updates (Scadify v16), the phone's way: a check when the app
     // opens (the checker itself skips when the last one is under 3 hours old), then every
@@ -184,8 +193,21 @@ internal fun WatchApp() {
         onNext = { if (mode == WatchMode.PHONE) phoneControl("next") else WatchLocal.next() },
         volume = rememberWatchVolume(),
         lists = lists,
-        onPlay = { error = null; WatchPlay.play(context, it.uri) { e -> error = e } },
+        onOpen = { openList = it },
         onRetry = { attempt++ },
+        openList = openList,
+        openTracks = openTracks,
+        onCloseList = { openList = null },
+        onPlayList = { error = null; WatchPlay.play(context, it.uri) { e -> error = e } },
+        onPlayTrack = { i ->
+            val opened = openList
+            val songs = openTracks?.getOrNull()
+            if (opened != null && songs != null) {
+                error = null
+                WatchPlay.playTrack(context, opened.uri, songs, i) { e -> error = e }
+            }
+        },
+        onRetryTracks = { tracksAttempt++ },
         extensionsNote = syncNote ?: stringResource(R.string.wear_extensions_count, extensions.size),
         onSyncExtensions = {
             syncNote = context.getString(R.string.wear_loading)
@@ -255,6 +277,28 @@ object WatchPlay {
                 WatchLocal.stop()
                 failed(app.getString(
                     if (tracks.isNotEmpty() && tracks.all { it.phoneOnly }) R.string.wear_phone_only else R.string.wear_no_source))
+            }
+        }
+    }
+
+    /** A song tapped in an opened list: the list plays on the watch from that song. */
+    fun playTrack(context: android.content.Context, uri: String, tracks: List<WatchTrack>, index: Int, failed: (String) -> Unit) {
+        val app = context.applicationContext
+        scope.launch {
+            WatchExtensions.init(app)
+            val track = tracks.getOrNull(index) ?: return@launch
+            if (track.phoneOnly) {
+                failed(app.getString(R.string.wear_phone_only_one))
+                return@launch
+            }
+            val found = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                if (WatchExtensions.hasAudio()) WatchExtensions.audio(track) else null
+            }
+            if (found != null) {
+                WatchLocal.play(app, tracks, index, found, uri = uri)
+            } else {
+                WatchLocal.stop()
+                failed(app.getString(R.string.wear_no_source))
             }
         }
     }
