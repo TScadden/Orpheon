@@ -17,6 +17,11 @@ import java.util.UUID
  * the names and the cover as the source listed them), not a phone file — so it is not a
  * [LocalItem]. It plays through the audio-source extensions like any catalog song.
  * [key]: this row's own id (rows are taken out by key).
+ *
+ * A song whose source is not Spotify (an Amazon Music link, a playlist file) has no
+ * Spotify track id: [spotifyTrackId] is "" and the row is identified by its own key and,
+ * where the source stated one, its [asin]. Such rows play by their title and artist
+ * (and their ISRC once one is attached), never by a Spotify id.
  */
 data class ImportedSong(
     val key: String,
@@ -30,7 +35,16 @@ data class ImportedSong(
      * embed page does not): playback and downloads match sources by it, no lookup needed.
      * "" when unknown — playlists stored before it was kept read as "". */
     val isrc: String = "",
-)
+    /** The song's Amazon ASIN, when the source stated one (an Amazon page's track link,
+     * a playlist file's track id): the row's identity at its own source, and the store's
+     * way of telling two id-less rows of one song apart. "" when unknown. */
+    val asin: String = "",
+) {
+
+    /** How this song is told apart inside one playlist: its Spotify id, else its ASIN,
+     * else nothing — a song with neither cannot be told apart from another. */
+    val identity: String get() = spotifyTrackId.ifBlank { asin }
+}
 
 /** A playlist brought in from a public link (see PlaylistImport), kept on this phone only. */
 data class ImportedPlaylist(
@@ -86,12 +100,12 @@ object ImportedPlaylists {
     /**
      * Keeps an imported list: every song gets its own row key here. A song is in a playlist
      * at most once (the store's rule, as in [LocalPlaylists]): a source list that names the
-     * same track twice imports it once, first listing first; a song with no track id cannot
-     * be told apart from another, so it is always kept.
+     * same track twice imports it once, first listing first; a song with no identity at its
+     * source (no Spotify id, no ASIN) cannot be told apart from another, so it is always kept.
      */
     fun create(name: String, sourceUrl: String, songs: List<ImportedSong>): ImportedPlaylist {
         val seen = HashSet<String>()
-        val once = songs.filter { it.spotifyTrackId.isBlank() || seen.add(it.spotifyTrackId) }
+        val once = songs.filter { it.identity.isBlank() || seen.add(it.identity) }
         val p = ImportedPlaylist(
             UUID.randomUUID().toString(), name.trim(), sourceUrl,
             once.map { it.copy(key = UUID.randomUUID().toString()) }, System.currentTimeMillis(),
@@ -175,10 +189,11 @@ object ImportedPlaylists {
 
     private fun songJson(s: ImportedSong) = JSONObject().put("key", s.key).put("track", s.spotifyTrackId)
         .put("title", s.title).put("artist", s.artist).put("album", s.album).put("duration", s.durationMs).put("cover", s.coverUrl)
-        .put("isrc", s.isrc)
+        .put("isrc", s.isrc).put("asin", s.asin)
 
     private fun songOf(o: JSONObject) = ImportedSong(o.getString("key"), o.getString("track"), o.optString("title"),
-        o.optString("artist"), o.optString("album"), o.optLong("duration"), o.optString("cover"), o.optString("isrc"))
+        o.optString("artist"), o.optString("album"), o.optLong("duration"), o.optString("cover"), o.optString("isrc"),
+        o.optString("asin"))
 
     internal fun write(): String {
         val lists = JSONArray()

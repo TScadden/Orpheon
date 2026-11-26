@@ -20,8 +20,28 @@ class PlaylistImportTest {
     }
 
     @Test fun amazonAndGarbageLinks() {
-        assertEquals(PlaylistLink.Amazon, PlaylistLinks.parse("https://music.amazon.com/playlists/B0CPYZ1234"))
-        assertEquals(PlaylistLink.Amazon, PlaylistLinks.parse("https://music.amazon.co.uk/playlists/B0CPYZ1234?marketplaceId=A1F83G8C2ARO7P"))
+        // Editorial and user playlists, on the .com host and a regional one: the link
+        // is kept whole, because its host and territory suffix are part of the address
+        // the reader must open.
+        assertEquals(
+            PlaylistLink.Amazon("https://music.amazon.com/playlists/B0CPYZ1234"),
+            PlaylistLinks.parse("https://music.amazon.com/playlists/B0CPYZ1234"),
+        )
+        assertEquals(
+            PlaylistLink.Amazon("https://music.amazon.co.uk/playlists/B0CPYZ1234?marketplaceId=A1F83G8C2ARO7P"),
+            PlaylistLinks.parse("https://music.amazon.co.uk/playlists/B0CPYZ1234?marketplaceId=A1F83G8C2ARO7P"),
+        )
+        assertEquals(
+            PlaylistLink.Amazon("https://music.amazon.com/user-playlists/13490f326c65481596accb1ab639b504sune?ref=dm_sh_x"),
+            PlaylistLinks.parse("https://music.amazon.com/user-playlists/13490f326c65481596accb1ab639b504sune?ref=dm_sh_x"),
+        )
+        assertEquals(
+            PlaylistLink.Amazon("https://music.amazon.de/user-playlists/abcdef0123456789abcdef0123456789jajp"),
+            PlaylistLinks.parse("  https://music.amazon.de/user-playlists/abcdef0123456789abcdef0123456789jajp  "),
+        )
+        // An Amazon link that names no playlist is not a playlist link.
+        assertEquals(PlaylistLink.Unknown, PlaylistLinks.parse("https://music.amazon.com/albums/B0CPYZ1234"))
+        assertEquals(PlaylistLink.Unknown, PlaylistLinks.parse("https://music.amazon.com/artists/B0CPYZ1234"))
         assertEquals(PlaylistLink.Unknown, PlaylistLinks.parse("https://example.com/playlist/$id"))
         assertEquals(PlaylistLink.Unknown, PlaylistLinks.parse("https://open.spotify.com/album/$id"))
         assertEquals(PlaylistLink.Unknown, PlaylistLinks.parse("not a link"))

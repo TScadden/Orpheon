@@ -991,9 +991,16 @@ class Api constructor(
         emit(Response.Success(page(tracks, true)))
     }
 
-    /** An imported song as a row: built exactly like [songOf] builds a Spotify track, with the row's own key kept. */
+    /**
+     * An imported song as a row: built exactly like [songOf] builds a Spotify track, with
+     * the row's own key kept. A song with no Spotify id (an Amazon or file import) keys
+     * its model id on its own row key instead — every such row would otherwise share the
+     * one id of "track:" — and its play query is the plain title-and-artist text
+     * [SongPlayer.buildSpotifyPlayQuery] makes of a blank id, so it plays through the
+     * extensions like any catalog song, never by a Spotify id it does not have.
+     */
     private fun importedSongOf(s: ImportedSong): SongsModel = SongsModel(
-        id = stableId("track:${s.spotifyTrackId}"),
+        id = stableId("track:" + s.spotifyTrackId.ifBlank { "row:${s.key}" }),
         title = s.title.take(128),
         album = s.album,
         singer = s.artist,
@@ -1020,7 +1027,11 @@ class Api constructor(
             name = p.name,
             coverUri = if (p.cover.isNotBlank()) java.io.File(p.cover).toURI().toString()
                 else p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl.orEmpty(),
-            ownerName = context.getString(R.string.imported_playlist_subtitle),
+            ownerName = context.getString(when (PlaylistLinks.parse(p.sourceUrl)) {
+                is PlaylistLink.Spotify -> R.string.imported_playlist_subtitle
+                is PlaylistLink.Amazon -> R.string.imported_playlist_subtitle_amazon
+                PlaylistLink.Unknown -> R.string.imported_playlist_subtitle_generic
+            }),
             metaLine = context.resources.getQuantityString(R.plurals.lbl_n_songs, p.items.size, p.items.size),
             tracks = p.items.map(::importedSongOf),
             complete = true,

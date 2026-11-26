@@ -13,8 +13,15 @@ import java.util.concurrent.TimeUnit
 /** What a pasted playlist link is, before anything is fetched. */
 sealed interface PlaylistLink {
     data class Spotify(val id: String) : PlaylistLink
-    /** Amazon Music: its API is closed and authorized-only, so a link can be told apart but not read. */
-    object Amazon : PlaylistLink
+
+    /**
+     * Amazon Music: no public reading of a link exists (its API is closed and
+     * authorized-only, and the share page itself is an empty app shell), so the link is
+     * read by rendering the web player on the phone instead (see [AmazonReadSession]).
+     * [url] is the link as pasted: its own host and territory suffix are part of the
+     * address, so it is kept whole.
+     */
+    data class Amazon(val url: String) : PlaylistLink
     object Unknown : PlaylistLink
 }
 
@@ -24,18 +31,25 @@ object PlaylistLinks {
     fun parse(raw: String): PlaylistLink {
         val s = raw.trim()
         if (s.isEmpty()) return PlaylistLink.Unknown
-        if (s.contains("music.amazon", ignoreCase = true)) return PlaylistLink.Amazon
         if (s.startsWith("spotify:playlist:", ignoreCase = true)) {
             val id = s.removePrefix("spotify:playlist:").substringBefore('?').trim()
             return if (SPOTIFY_ID.matches(id)) PlaylistLink.Spotify(id) else PlaylistLink.Unknown
         }
+        val host = s.substringAfter("://", s).substringBefore('/').substringBefore('?').lowercase()
+        val seg = s.substringAfter("://", "").split('/').filter { it.isNotBlank() }
         // open.spotify.com/[intl-xx/][embed/]playlist/<id>[?...]
-        val host = s.substringAfter("://", s).substringBefore('/').lowercase()
         if (host == "open.spotify.com" || host == "spotify.com" || host == "play.spotify.com" || host.endsWith(".spotify.com")) {
-            val seg = s.substringAfter("://", "").split('/').filter { it.isNotBlank() }
             val at = seg.indexOf("playlist")
             val id = if (at >= 0) seg.getOrNull(at + 1)?.substringBefore('?')?.substringBefore('#').orEmpty() else ""
             return if (SPOTIFY_ID.matches(id)) PlaylistLink.Spotify(id) else PlaylistLink.Unknown
+        }
+        // music.amazon.<any territory>/[user-]playlists/<id>[?...]: editorial playlists
+        // live under /playlists/, a listener's own under /user-playlists/. An Amazon
+        // link that names neither (an album, an artist) is not a playlist link.
+        if (host == "music.amazon.com" || host.startsWith("music.amazon.")) {
+            val at = seg.indexOfFirst { it == "playlists" || it == "user-playlists" }
+            val id = if (at >= 0) seg.getOrNull(at + 1)?.substringBefore('?')?.substringBefore('#').orEmpty() else ""
+            return if (id.isNotBlank()) PlaylistLink.Amazon(s) else PlaylistLink.Unknown
         }
         return PlaylistLink.Unknown
     }

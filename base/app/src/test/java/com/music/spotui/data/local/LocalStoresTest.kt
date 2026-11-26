@@ -218,4 +218,64 @@ class LocalStoresTest {
         assertEquals("New", LocalPlaylists.additions.getValue("s1")[0].title)
         assertTrue(LocalPlaylists.write().contains("\"title\":\"New\""))
     }
+
+    @Test fun anImportedSongsAsinSurvivesARestartAsText() {
+        val p = ImportedPlaylists.create("From Amazon", "https://music.amazon.com/user-playlists/abc", listOf(
+            ImportedSong("", "", "One", "Artist A", "Alb", 201_000L, "https://img/1", "", "B0TRACK001"),
+            ImportedSong("", "", "Two", "Artist B", "Other", 182_000L, ""),
+        ))
+        val text = ImportedPlaylists.write()
+        ImportedPlaylists.playlists.clear()
+        ImportedPlaylists.read(text)
+        val again = ImportedPlaylists.playlists.getValue(p.id)
+        assertEquals("B0TRACK001", again.items[0].asin)
+        assertEquals("", again.items[0].spotifyTrackId)
+        assertEquals("", again.items[1].asin)
+        ImportedPlaylists.delete(p.id)
+        // A file written before ASINs were kept loads with "" and loses nothing else.
+        ImportedPlaylists.read(
+            """{"version":1,"playlists":[
+                {"id":"old2","name":"Old Mix","source":"","created":5,"cover":"",
+                 "items":[{"key":"k1","track":"","title":"One","artist":"Artist A","album":"Alb","duration":201000,"cover":"","isrc":"USS1Z2500001"}]}
+            ]}""",
+        )
+        val old = ImportedPlaylists.playlists.getValue("old2")
+        assertEquals("", old.items[0].asin)
+        assertEquals("USS1Z2500001", old.items[0].isrc)
+        ImportedPlaylists.delete("old2")
+    }
+
+    @Test fun anImportedListTellsSongsApartByAsinWhenTheyHaveNoSpotifyId() {
+        val p = ImportedPlaylists.create("Dupes", "https://music.amazon.com/playlists/x", listOf(
+            ImportedSong("", "", "One", "Artist A", "", 201_000L, "", "", "B0TRACK001"),
+            ImportedSong("", "", "One (again)", "Artist A", "", 201_000L, "", "", "B0TRACK001"),
+            ImportedSong("", "", "One", "Artist A", "", 201_000L, ""),
+            ImportedSong("", "", "One", "Artist A", "", 201_000L, ""),
+        ))
+        // The same ASIN twice imports once; two songs with no identity at all are
+        // both kept — they cannot be told apart, so neither is dropped.
+        assertEquals(3, p.items.size)
+        ImportedPlaylists.delete(p.id)
+    }
+
+    @Test fun theSpotifyRepairLeavesAnAmazonPlaylistExactlyAsStored() {
+        // The repair pass consumes a fresh Spotify reading keyed by Spotify track id.
+        // An Amazon playlist's rows have none, so no reading can complete them — not
+        // even one keyed by their ASIN — and the pass reports nothing repaired. (The
+        // pass's caller also gates on the source being a Spotify link at all.)
+        val p = ImportedPlaylists.create("From Amazon", "https://music.amazon.com/user-playlists/abc", listOf(
+            ImportedSong("", "", "One", "Artist A", "", 201_000L, "", "", "B0TRACK001"),
+            ImportedSong("", "", "Two", "Artist B", "", 182_000L, ""),
+        ))
+        val repaired = ImportedPlaylists.repair(p.id, mapOf(
+            "B0TRACK001" to ImportedSong("", "B0TRACK001", "One", "Artist A", "Alb", 201_000L, "https://img/1", "USS1Z2500001"),
+        ))
+        assertTrue(repaired.isEmpty())
+        val after = ImportedPlaylists.playlists.getValue(p.id)
+        assertEquals("", after.items[0].album)
+        assertEquals("", after.items[0].coverUrl)
+        assertEquals("", after.items[0].isrc)
+        assertEquals("B0TRACK001", after.items[0].asin)
+        ImportedPlaylists.delete(p.id)
+    }
 }
