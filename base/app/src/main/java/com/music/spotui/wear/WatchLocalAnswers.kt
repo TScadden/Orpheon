@@ -18,8 +18,12 @@ import org.json.JSONObject
  * - `isrc`: the recording's fingerprint where the store has it (imported songs do), so the
  *   watch's extensions match the exact recording instead of a same-named one.
  * - `phoneOnly`: the row is a file of this phone with no catalogue identity kept for it (no
- *   track id, no ISRC): the watch cannot reach the file and must not pretend it can fetch the
- *   song. Such rows are for display and for Phone mode, never for the watch's own player.
+ *   track id, no ISRC), so the watch's extensions cannot fetch the song. Such rows carry
+ *   one more field, `localUri`: the file's address on this phone. Since v21 the watch
+ *   pulls the file itself over the Data Layer (see [WatchAnswers.FILE]) and plays it on
+ *   the watch; [WatchAnswers] adds the file's `size` and `modified` beside it, which the
+ *   watch keys its on-watch cache on. A phone-only row with no `localUri` (an imported
+ *   song with no identity kept) is one the watch truly cannot play.
  */
 object WatchLocalAnswers {
     const val LOCAL_PREFIX = "scadify:local:"
@@ -37,7 +41,7 @@ object WatchLocalAnswers {
     /** A local playlist's rows: phone files, every one of them phone-only (see the class doc). */
     fun localTracks(p: LocalPlaylist): List<JSONObject> = p.items.map { item ->
         track(uri = "", name = item.title, artists = listOf(item.artist), album = item.album,
-            durationMs = item.durationMs, cover = "", isrc = "", phoneOnly = true)
+            durationMs = item.durationMs, cover = "", isrc = "", phoneOnly = true, localUri = item.uri)
     }
 
     /** An imported playlist's rows: catalogue songs, by their Spotify id and ISRC where kept. */
@@ -64,19 +68,21 @@ object WatchLocalAnswers {
             )
         } + local.map { item ->
             track(uri = "", name = item.title, artists = listOf(item.artist), album = item.album,
-                durationMs = item.durationMs, cover = "", isrc = "", phoneOnly = true)
+                durationMs = item.durationMs, cover = "", isrc = "", phoneOnly = true, localUri = item.uri)
         }
 
-    /** One track object, the account answer's shape plus `isrc` and `phoneOnly`. */
+    /** One track object, the account answer's shape plus `isrc`, `phoneOnly` and `localUri`. */
     fun track(
         uri: String, name: String, artists: List<String>, album: String,
         durationMs: Long, cover: String, isrc: String, phoneOnly: Boolean,
+        localUri: String = "",
     ): JSONObject = JSONObject().apply {
         put("uri", uri); put("name", name); put("durationMs", durationMs)
         put("artists", JSONArray().apply { artists.forEach { put(it) } })
         put("album", album)
         if (cover.isNotBlank()) put("cover", cover)
         put("isrc", isrc); put("phoneOnly", phoneOnly)
+        if (localUri.isNotBlank()) put("localUri", localUri)
     }
 
     /** How two rows of one answer are told apart when merging sources: by uri, else by name + artist. */

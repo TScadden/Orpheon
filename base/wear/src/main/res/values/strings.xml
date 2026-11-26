@@ -22,6 +22,13 @@
     <string name="wear_extensions_synced">%1$d copied to the watch</string>
     <string name="wear_previous">Previous</string>
     <string name="wear_play">Play</string>
+    <string name="wear_shuffle">Shuffle</string>
+    <string name="wear_pulling">Getting it from your phone…</string>
+    <string name="wear_pull_no_phone">Can\'t reach your phone.</string>
+    <string name="wear_pull_gone">That song is no longer on your phone.</string>
+    <string name="wear_pulls_header">On-watch songs</string>
+    <string name="wear_pulls_usage">%1$d MB of 250 MB</string>
+    <string name="wear_pulls_clear">Clear</string>
     <string name="wear_pause">Pause</string>
     <string name="wear_next">Next</string>
     <string name="wear_no_source">No extension on the watch has these songs.</string>
