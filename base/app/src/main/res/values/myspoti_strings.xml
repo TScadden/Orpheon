@@ -751,7 +751,6 @@
     <string name="equalizer_skip_silence">Skip silences</string>
     <string name="equalizer_skip_silence_detail">Silent stretches are skipped (long pauses in an episode, a silence before a hidden track).</string>
     <string name="download_source_not_answering">%1$s is not answering for now</string>
-    <string name="friends_tab">Friends</string>
     <string name="library_podcasts_empty">No podcasts followed yet</string>
     <string name="library_podcasts_error">Couldn\'t load your podcasts</string>
     <string name="settings_player_volume_title">Volume bar in the player</string>

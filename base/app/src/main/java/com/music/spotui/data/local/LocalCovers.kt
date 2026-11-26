@@ -137,10 +137,13 @@ object LocalCovers {
      * The art chain itself, on plain values: the song's cover wins; the file's own art
      * shows when it exists; the album's cover stands in when it does not; with no cover
      * set, the art the album lends stands in; the file's own address is the last resort
-     * (its failure shows the placeholder).
+     * (its failure shows the placeholder). [fallback] — an album page's own art — stands
+     * in only where the chain would otherwise end at that last-resort address: a file
+     * with art of its own, a set cover or a set album cover never gives it up for the
+     * fallback.
      */
-    internal fun chooseArt(songCover: String?, ownArt: String, ownArtExists: Boolean, albumCover: String?, borrowedArt: String? = null): String =
-        songCover ?: if (ownArtExists) ownArt else albumCover ?: borrowedArt ?: ownArt
+    internal fun chooseArt(songCover: String?, ownArt: String, ownArtExists: Boolean, albumCover: String?, borrowedArt: String? = null, fallback: String? = null): String =
+        songCover ?: if (ownArtExists) ownArt else albumCover ?: borrowedArt ?: fallback ?: ownArt
 
     /** The effective art address of the file at [uri] (display form: content:// or file://). */
     fun effectiveArt(uri: String, album: String, ownArt: String): String = chooseArt(
@@ -149,6 +152,24 @@ object LocalCovers {
         ownArtExists(ownArt),
         albumCover(album)?.let { Uri.fromFile(File(it)).toString() },
         borrowedArt(album),
+    )
+
+    /**
+     * The effective art of a row on an album page, read under the PAGE's album
+     * ([pageAlbum]): the tracks are on the page because the page's album holds them,
+     * whatever their own album tags say, so the set-cover and borrowed lookups key on
+     * the page — a cover set from this page (or lent under its name) is found even when
+     * a file's tag names the album differently. [pageArt] — the header's own art
+     * address — is the chain's last resort before the file's placeholder-bound
+     * address, so an artless row shows the same cover the header shows.
+     */
+    fun effectiveArt(uri: String, ownArt: String, pageAlbum: String, pageArt: String?): String = chooseArt(
+        songCover(uri)?.let { Uri.fromFile(File(it)).toString() },
+        ownArt,
+        ownArtExists(ownArt),
+        albumCover(pageAlbum)?.let { Uri.fromFile(File(it)).toString() },
+        borrowedArt(pageAlbum),
+        pageArt,
     )
 
     /** The effective art address of a stored local row. */

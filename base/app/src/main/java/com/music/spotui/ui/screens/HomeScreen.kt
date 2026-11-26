@@ -315,11 +315,6 @@ private fun HomeHeaderRow(navController: NavController, facet: String, onFacet: 
                 }
             }
         }
-        // Friend activity, out of the tab bar: at the end of the header, as Spotify has it.
-        IconButton(onClick = { navController.navigate(com.music.spotui.ui.navigation.Routes.Friends.route) }) {
-            Icon(androidx.compose.ui.res.painterResource(R.drawable.ic_friends_big), contentDescription = stringResource(R.string.friends_title),
-                tint = AppText, modifier = Modifier.size(24.dp))
-        }
     }
 }
 

@@ -592,7 +592,6 @@
     <string name="equalizer_skip_silence">跳过静音</string>
     <string name="equalizer_skip_silence_detail">会跳过静音片段（节目中的长时间停顿、隐藏曲目前的静音）。</string>
     <string name="download_source_not_answering">%1$s 暂时无响应</string>
-    <string name="friends_tab">好友</string>
     <string name="library_podcasts_empty">你还没有关注任何播客</string>
     <string name="library_podcasts_error">无法加载你的播客</string>
     <string name="settings_player_volume_title">播放器中的音量条</string>

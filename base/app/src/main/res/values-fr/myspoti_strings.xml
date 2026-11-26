@@ -642,7 +642,6 @@
     <string name="equalizer_skip_silence">Sauter les silences</string>
     <string name="equalizer_skip_silence_detail">Les passages silencieux sont sautés (longues pauses dans un épisode, silence avant un titre caché).</string>
     <string name="download_source_not_answering">%1$s ne répond pas pour le moment</string>
-    <string name="friends_tab">Amis</string>
     <string name="library_podcasts_empty">Aucun podcast suivi pour l\'instant</string>
     <string name="library_podcasts_error">Impossible de charger vos podcasts</string>
     <string name="settings_player_volume_title">Barre de volume dans le lecteur</string>

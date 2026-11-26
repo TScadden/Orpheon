@@ -121,6 +121,10 @@ fun LocalAlbumScreen(navController: NavController, artist: String, album: String
         }
     }
     val list = tracks.orEmpty()
+    // The header's art address, computed once: the rows fall back to it, so a track
+    // with no art of its own shows the same cover the header shows
+    // (LocalCovers.effectiveArt). The header below loads this same address.
+    val headerArt = albumCover?.let { java.io.File(it).toURI().toString() } ?: LocalCovers.borrowedArt(album) ?: list.firstOrNull()?.artUri?.toString()
     // The header names an artist only when every file on the page shares that
     // one artist string; a name-grouped album of mixed credits reads Various.
     val sharedArtist = if (tracks != null) LocalAlbums.sharedArtist(list) else null
@@ -160,7 +164,7 @@ fun LocalAlbumScreen(navController: NavController, artist: String, album: String
                 LazyColumn(contentPadding = PaddingValues(bottom = com.music.spotui.ui.components.bottomBarsSpace()), modifier = Modifier.fillMaxSize()) {
                     item(key = "cover") {
                         GlideImage(
-                            model = albumCover?.let { java.io.File(it) } ?: LocalCovers.borrowedArt(album) ?: list.firstOrNull()?.artUri,
+                            model = headerArt,
                             contentDescription = null, contentScale = ContentScale.Crop,
                             loading = placeholder(R.drawable.placeholder), failure = placeholder(R.drawable.local_files_cover),
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
@@ -190,9 +194,10 @@ fun LocalAlbumScreen(navController: NavController, artist: String, album: String
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                         ) {
                             GlideImage(
-                                // Through the art chain like every other surface: a track with
-                                // no art of its own shows the album's set or borrowed cover.
-                                model = LocalCovers.effectiveArt(t.uri.toString(), t.album, t.artUri.toString()), contentDescription = null, contentScale = ContentScale.Crop,
+                                // Through the art chain, read under this page's album: a track
+                                // with no art of its own shows the album's set or borrowed
+                                // cover — and, as the last resort, the header's own art.
+                                model = LocalCovers.effectiveArt(t.uri.toString(), t.artUri.toString(), album, headerArt), contentDescription = null, contentScale = ContentScale.Crop,
                                 loading = placeholder(R.drawable.placeholder), failure = placeholder(R.drawable.local_files_cover),
                                 modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
                             )

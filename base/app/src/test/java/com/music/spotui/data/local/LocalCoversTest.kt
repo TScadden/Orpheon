@@ -33,6 +33,19 @@ class LocalCoversTest {
         assertEquals("content://art/1", LocalCovers.chooseArt(null, "content://art/1", ownArtExists = false, albumCover = null, borrowedArt = null))
     }
 
+    @Test fun aFallbackStandsInOnlyWhereTheChainOtherwiseEndsAtTheOwnAddress() {
+        // The album-page fallback (v24): below everything the chain already had.
+        assertEquals("page.jpg", LocalCovers.chooseArt(null, "content://art/1", ownArtExists = false, albumCover = null, borrowedArt = null, fallback = "page.jpg"))
+        // A file with art of its own keeps it; a set song cover, album cover and lent
+        // art all still win over the fallback.
+        assertEquals("content://art/1", LocalCovers.chooseArt(null, "content://art/1", ownArtExists = true, albumCover = null, borrowedArt = null, fallback = "page.jpg"))
+        assertEquals("song.jpg", LocalCovers.chooseArt("song.jpg", "content://art/1", ownArtExists = false, albumCover = null, borrowedArt = null, fallback = "page.jpg"))
+        assertEquals("album.jpg", LocalCovers.chooseArt(null, "content://art/1", ownArtExists = false, albumCover = "album.jpg", borrowedArt = null, fallback = "page.jpg"))
+        assertEquals("content://art/2", LocalCovers.chooseArt(null, "content://art/1", ownArtExists = false, albumCover = null, borrowedArt = "content://art/2", fallback = "page.jpg"))
+        // No fallback (every other surface): the chain is exactly as before.
+        assertEquals("content://art/1", LocalCovers.chooseArt(null, "content://art/1", ownArtExists = false, albumCover = null, borrowedArt = null, fallback = null))
+    }
+
     @Test fun anAlbumLendsTheArtOfItsFirstFileThatHasAny() {
         val rows = listOf(
             Triple("Laroi Unreleased", "content://art/1", false),

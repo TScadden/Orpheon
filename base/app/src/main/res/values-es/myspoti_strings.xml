@@ -592,7 +592,6 @@
     <string name="equalizer_skip_silence">Saltar silencios</string>
     <string name="equalizer_skip_silence_detail">Los tramos silenciosos se saltan (pausas largas en un episodio, un silencio antes de una pista oculta).</string>
     <string name="download_source_not_answering">%1$s no responde por ahora</string>
-    <string name="friends_tab">Amigos</string>
     <string name="library_podcasts_empty">Aún no sigues ningún podcast</string>
     <string name="library_podcasts_error">No se pudieron cargar tus podcasts</string>
     <string name="settings_player_volume_title">Barra de volumen en el reproductor</string>

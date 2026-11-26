@@ -607,7 +607,6 @@
     <string name="equalizer_skip_silence">Пропускать тишину</string>
     <string name="equalizer_skip_silence_detail">Тихие участки пропускаются (долгие паузы в выпуске, тишина перед скрытым треком).</string>
     <string name="download_source_not_answering">Источник %1$s пока не отвечает</string>
-    <string name="friends_tab">Друзья</string>
     <string name="library_podcasts_empty">Вы пока не подписаны ни на один подкаст</string>
     <string name="library_podcasts_error">Не удалось загрузить подкасты</string>
     <string name="settings_player_volume_title">Полоса громкости в плеере</string>

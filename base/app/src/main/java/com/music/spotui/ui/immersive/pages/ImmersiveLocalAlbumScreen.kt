@@ -83,6 +83,9 @@ fun ImmersiveLocalAlbumScreen(navController: NavController, artist: String, albu
         }
     }
     val list = tracks.orEmpty()
+    // The header's art, computed once: the rows fall back to it, so a track with no
+    // art of its own shows the same cover the header shows (LocalCovers.effectiveArt).
+    val headerArt = albumCover?.let { java.io.File(it).toURI().toString() } ?: LocalCovers.borrowedArt(album) ?: list.firstOrNull()?.artUri?.toString()
     val np by SongPlayer.nowPlaying
     // Same header rule as the Classic page: an artist is named only when every
     // file shares that one artist string; mixed credits read Various artists.
@@ -111,7 +114,7 @@ fun ImmersiveLocalAlbumScreen(navController: NavController, artist: String, albu
         item(key = "cover") {
             Box(Modifier.fillMaxWidth().padding(horizontal = Immersive.Gutter, vertical = 8.dp), contentAlignment = Alignment.Center) {
                 ImmersiveCover(
-                    albumCover?.let { java.io.File(it).toURI().toString() } ?: LocalCovers.borrowedArt(album) ?: list.firstOrNull()?.artUri?.toString(),
+                    headerArt,
                     Modifier.fillMaxWidth(0.62f).aspectRatio(1f),
                     Immersive.CoverLarge,
                 )
@@ -137,9 +140,10 @@ fun ImmersiveLocalAlbumScreen(navController: NavController, artist: String, albu
             ImmersiveListRow(
                 title = t.title,
                 subtitle = t.artist.ifBlank { null },
-                // Through the art chain like every other surface: a track with no art
-                // of its own shows the album's set or borrowed cover, not a placeholder.
-                imageUrl = LocalCovers.effectiveArt(t.uri.toString(), t.album, t.artUri.toString()),
+                // Through the art chain, read under this page's album: a track with no
+                // art of its own shows the album's set or borrowed cover — and, as the
+                // last resort, the header's own art — not a placeholder.
+                imageUrl = LocalCovers.effectiveArt(t.uri.toString(), t.artUri.toString(), album, headerArt),
                 round = false,
                 playing = current && SongPlayer.isPlaying(),
                 onClick = { LocalPlayer.play(list, index, context = album) },

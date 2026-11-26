@@ -592,7 +592,6 @@
     <string name="equalizer_skip_silence">Παράλειψη σιωπών</string>
     <string name="equalizer_skip_silence_detail">Τα σιωπηλά διαστήματα παραλείπονται (μεγάλες παύσεις σε ένα επεισόδιο, σιωπή πριν από κρυφό κομμάτι).</string>
     <string name="download_source_not_answering">Η πηγή %1$s δεν απαντά προς το παρόν</string>
-    <string name="friends_tab">Φίλοι</string>
     <string name="library_podcasts_empty">Δεν ακολουθείς ακόμη κανένα podcast</string>
     <string name="library_podcasts_error">Δεν φορτώθηκαν τα podcast σου</string>
     <string name="settings_player_volume_title">Μπάρα έντασης στο πρόγραμμα αναπαραγωγής</string>
