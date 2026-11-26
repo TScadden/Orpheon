@@ -117,9 +117,9 @@ fun AddCollectionToPlaylistSheet(sourceUri: String, title: String, onDismiss: ()
     /** The source's songs as models, read from its page: an album's or playlist's tracks. */
     suspend fun sourceSongs(uri: String): List<com.music.spotui.data.entity.SongsModel>? {
         val page = when {
-            uri.startsWith("spotify:album:") -> com.music.spotui.data.api.Api.getAlbumPage(uri.substringAfterLast(':'))
-            uri.startsWith("spotify:playlist:") -> com.music.spotui.data.api.Api.getPlaylistPage(uri.substringAfterLast(':'))
-            uri.startsWith("scadify:imported:") -> com.music.spotui.data.api.Api.getImportedPlaylistPage(uri.removePrefix("scadify:imported:"))
+            uri.startsWith("spotify:album:") -> com.music.spotui.di.Graph.api.getAlbumPage(uri.substringAfterLast(':'))
+            uri.startsWith("spotify:playlist:") -> com.music.spotui.di.Graph.api.getPlaylistPage(uri.substringAfterLast(':'))
+            uri.startsWith("scadify:imported:") -> com.music.spotui.di.Graph.api.getImportedPlaylistPage(uri.removePrefix("scadify:imported:"))
             else -> return null
         }
         return page.toList().mapNotNull { (it as? com.music.spotui.data.api.Response.Success)?.data }.lastOrNull()?.tracks
