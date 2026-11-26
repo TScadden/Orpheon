@@ -22,7 +22,7 @@ object CastProtocol {
     const val GROUP_MODEL = "Google Cast Group"
 
     fun type(t: String) = JSONObject().put("type", t)
-    fun connect() = type("CONNECT").put("userAgent", "Myspoti").put("origin", JSONObject())
+    fun connect() = type("CONNECT").put("userAgent", "Scadify").put("origin", JSONObject())
     fun launch(requestId: Int, appId: String = DEFAULT_MEDIA_RECEIVER) = type("LAUNCH").put("appId", appId).put("requestId", requestId)
     fun stopApp(requestId: Int, sessionId: String) = type("STOP").put("sessionId", sessionId).put("requestId", requestId)
     fun setVolume(requestId: Int, level: Double) =
