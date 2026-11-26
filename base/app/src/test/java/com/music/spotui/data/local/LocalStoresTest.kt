@@ -1,6 +1,7 @@
 package com.music.spotui.data.local
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -73,6 +74,83 @@ class LocalStoresTest {
         assertEquals(app.myspoti.api.Explicitness.UNKNOWN, again.items[2].explicit)
         ImportedPlaylists.delete(p.id)
         assertTrue(ImportedPlaylists.list().isEmpty())
+    }
+
+    // Adding to an imported playlist (v23, package D): the store had no add at
+    // all, so a user whose playlists are all imported could add a song to none
+    // of them (Boston's report, Nov 26 2026).
+    @Test fun importedPlaylistsGainSongsByAdd() {
+        val p = ImportedPlaylists.create("Growing Mix", "https://open.spotify.com/playlist/xyz", listOf(
+            ImportedSong("", "AAA", "One", "Artist A", "Alb", 201_000L, ""),
+        ))
+        val song = ImportedSong("", "BBB", "Two", "Artist B", "Other", 182_000L, "https://img/2", "USRC10000002")
+        assertTrue(ImportedPlaylists.add(p.id, song))
+        // The playlist page's tracks are this list, mapped row for row: the added
+        // row is there, last, with a fresh key of its own and its facts whole.
+        val after = ImportedPlaylists.get(p.id)!!
+        assertEquals(2, after.items.size)
+        val row = after.items[1]
+        assertTrue(row.key.isNotBlank())
+        assertTrue(row.key != after.items[0].key)
+        assertEquals("BBB", row.spotifyTrackId)
+        assertEquals("USRC10000002", row.isrc)
+        assertEquals("https://img/2", row.coverUrl)
+        // Already there under the same Spotify id: refused, and the caller is told.
+        assertFalse(ImportedPlaylists.add(p.id, song))
+        assertEquals(2, ImportedPlaylists.get(p.id)!!.items.size)
+        // No such playlist: refused too, never a silent success.
+        assertFalse(ImportedPlaylists.add("no-such-id", song))
+        ImportedPlaylists.delete(p.id)
+    }
+
+    @Test fun importedAddDedupesByAsinAndKeepsIdentitylessSongs() {
+        val p = ImportedPlaylists.create("Amazon Mix", "https://music.amazon.com/playlists/x", listOf(
+            ImportedSong("", "", "One", "Artist A", "Alb", 201_000L, "", "", "B0ASIN0001"),
+        ))
+        // The same ASIN again, under a slightly different title: the same song.
+        assertFalse(ImportedPlaylists.add(p.id, ImportedSong("", "", "One (again)", "Artist A", "Alb", 201_000L, "", "", "B0ASIN0001")))
+        // No identity at either source: always kept, as create() keeps them.
+        val loose = ImportedSong("", "", "Loose", "Artist C", "", 100_000L, "")
+        assertTrue(ImportedPlaylists.add(p.id, loose))
+        assertTrue(ImportedPlaylists.add(p.id, loose))
+        assertEquals(3, ImportedPlaylists.get(p.id)!!.items.size)
+        ImportedPlaylists.delete(p.id)
+    }
+
+    @Test fun importedAddAllReportsCountsAndSurvivesARestart() {
+        val p = ImportedPlaylists.create("Bulk Mix", "https://open.spotify.com/playlist/xyz", listOf(
+            ImportedSong("", "AAA", "One", "Artist A", "Alb", 201_000L, ""),
+        ))
+        val r = ImportedPlaylists.addAll(p.id, listOf(
+            ImportedSong("", "AAA", "One", "Artist A", "Alb", 201_000L, ""),
+            ImportedSong("", "BBB", "Two", "Artist B", "Other", 182_000L, ""),
+            ImportedSong("", "BBB", "Two", "Artist B", "Other", 182_000L, ""),
+        ))
+        assertEquals(AddResult(1, 2), r)
+        val text = ImportedPlaylists.write()
+        ImportedPlaylists.playlists.clear()
+        ImportedPlaylists.read(text)
+        assertEquals(listOf("AAA", "BBB"), ImportedPlaylists.get(p.id)!!.items.map { it.spotifyTrackId })
+        ImportedPlaylists.delete(p.id)
+    }
+
+    @Test fun importedRowOfCarriesThePickedSongsFacts() {
+        val song = com.music.spotui.data.entity.SongsModel(
+            id = 7, title = "Title", album = "Album", singer = "Singer", coverUri = "https://img/c",
+            url = "spotify:track:XYZ", spotifyTrackId = "XYZ", durationMs = 190_000,
+            isrc = "USRC10000009", explicitStatus = app.myspoti.api.Explicitness.EXPLICIT,
+        )
+        val row = ImportedPlaylists.rowOf(song)
+        assertEquals("XYZ", row.spotifyTrackId)
+        assertEquals("Title", row.title)
+        assertEquals("Singer", row.artist)
+        assertEquals("Album", row.album)
+        assertEquals(190_000L, row.durationMs)
+        assertEquals("https://img/c", row.coverUrl)
+        assertEquals("USRC10000009", row.isrc)
+        assertEquals(app.myspoti.api.Explicitness.EXPLICIT, row.explicit)
+        // The row plays like any imported row: by its Spotify id (the page's play query).
+        assertEquals("XYZ", row.identity)
     }
 
     @Test fun importedFilesWrittenBeforeTheExplicitMarkLoadAsUnknown() {

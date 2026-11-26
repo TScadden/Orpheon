@@ -995,6 +995,20 @@ private fun AddLocalToPlaylistSheet(tracks: List<LocalTrack>, single: Boolean, o
                     added(p.name, LocalPlaylists.addAll(p.id, tracks))
                 }
             }
+            // The imported playlists too: a file added there is a row of the file's own
+            // names (no catalog identity), playing by title and artist like an Amazon
+            // import's rows.
+            items(com.music.spotui.data.local.ImportedPlaylists.list(), key = { "i:" + it.id }) { p ->
+                PickRow(
+                    name = p.name, detail = stringResource(R.string.imported_playlist_subtitle_generic),
+                    cover = p.cover.takeIf { it.isNotBlank() }?.let { java.io.File(it) }
+                        ?: p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl,
+                ) {
+                    added(p.name, com.music.spotui.data.local.ImportedPlaylists.addAll(p.id, tracks.map {
+                        com.music.spotui.data.local.ImportedPlaylists.rowOf(it)
+                    }))
+                }
+            }
             when (val lists = spotifyLists) {
                 null -> item { Text(stringResource(R.string.loading_playlists), color = Color.Gray, fontSize = 14.sp, modifier = Modifier.padding(20.dp, 12.dp)) }
                 else -> items(lists, key = { "s:" + it.id }) { p ->
