@@ -4,6 +4,8 @@ build/
 .kotlin/
 *.apk
 *.zip
+# …but not the SoundCloud extension package the app bundles and seeds (BundledExtensions).
+!base/app/src/main/assets/soundcloud-extension.zip
 *.log
 dist/
 local.properties
