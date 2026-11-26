@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.HideImage
 import androidx.compose.material.icons.outlined.Image
@@ -62,6 +63,7 @@ import com.music.spotui.data.local.LocalMusic
 import com.music.spotui.data.local.LocalTrack
 import com.music.spotui.di.LocalPlayer
 import com.music.spotui.di.SongPlayer
+import com.music.spotui.ui.ArtDebugContent
 import com.music.spotui.ui.components.pressable
 import com.music.spotui.ui.theme.AppAccent
 import com.music.spotui.ui.theme.AppBackground
@@ -87,6 +89,7 @@ fun LocalAlbumScreen(navController: NavController, artist: String, album: String
     val scope = rememberCoroutineScope()
     var tracks by remember { mutableStateOf<List<LocalTrack>?>(null) }
     var menu by remember { mutableStateOf(false) }
+    var artDebug by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<LocalTrack?>(null) }
     var adding by remember { mutableStateOf<LocalTrack?>(null) }
     var coverTick by remember { mutableStateOf(0) }
@@ -118,6 +121,8 @@ fun LocalAlbumScreen(navController: NavController, artist: String, album: String
                 LocalCovers.clearAlbumCover(album)
                 coverTick++
             }
+            // TEMPORARY DIAGNOSTIC (v25): remove with ArtDebug.kt.
+            LocalAlbumSheetRow(Icons.Outlined.BugReport, "Art debug") { menu = false; artDebug = true }
         }
     }
     val list = tracks.orEmpty()
@@ -125,6 +130,10 @@ fun LocalAlbumScreen(navController: NavController, artist: String, album: String
     // with no art of its own shows the same cover the header shows
     // (LocalCovers.effectiveArt). The header below loads this same address.
     val headerArt = albumCover?.let { java.io.File(it).toURI().toString() } ?: LocalCovers.borrowedArt(album) ?: list.firstOrNull()?.artUri?.toString()
+    // TEMPORARY DIAGNOSTIC (v25): remove with ArtDebug.kt.
+    if (artDebug) com.music.spotui.ui.components.LookSheet(onDismissRequest = { artDebug = false }, containerColor = tone(0xFF282828)) {
+        ArtDebugContent(pageAlbum = album, tracks = list, headerArt = headerArt)
+    }
     // The header names an artist only when every file on the page shares that
     // one artist string; a name-grouped album of mixed credits reads Various.
     val sharedArtist = if (tracks != null) LocalAlbums.sharedArtist(list) else null

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.HideImage
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.MoreHoriz
@@ -31,6 +32,7 @@ import com.music.spotui.data.local.LocalMusic
 import com.music.spotui.data.local.LocalTrack
 import com.music.spotui.di.LocalPlayer
 import com.music.spotui.di.SongPlayer
+import com.music.spotui.ui.ArtDebugContent
 import com.music.spotui.ui.immersive.components.ImmersiveCover
 import com.music.spotui.ui.immersive.components.ImmersiveListRow
 import com.music.spotui.ui.immersive.components.ImmersiveMessageState
@@ -55,6 +57,7 @@ fun ImmersiveLocalAlbumScreen(navController: NavController, artist: String, albu
     val scope = rememberCoroutineScope()
     var tracks by remember { mutableStateOf<List<LocalTrack>?>(null) }
     var menu by remember { mutableStateOf(false) }
+    var artDebug by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<LocalItem?>(null) }
     var coverTick by remember { mutableStateOf(0) }
     LaunchedEffect(artist, album) {
@@ -75,6 +78,8 @@ fun ImmersiveLocalAlbumScreen(navController: NavController, artist: String, albu
             LocalCovers.clearAlbumCover(album)
             coverTick++
         })
+        // TEMPORARY DIAGNOSTIC (v25): remove with ArtDebug.kt.
+        ImmersiveSheetRow(Icons.Rounded.BugReport, "Art debug", onClick = { menu = false; artDebug = true })
     }
     editing?.let { item ->
         com.music.spotui.ui.screens.EditLocalItemDialog(item) {
@@ -86,6 +91,10 @@ fun ImmersiveLocalAlbumScreen(navController: NavController, artist: String, albu
     // The header's art, computed once: the rows fall back to it, so a track with no
     // art of its own shows the same cover the header shows (LocalCovers.effectiveArt).
     val headerArt = albumCover?.let { java.io.File(it).toURI().toString() } ?: LocalCovers.borrowedArt(album) ?: list.firstOrNull()?.artUri?.toString()
+    // TEMPORARY DIAGNOSTIC (v25): remove with ArtDebug.kt.
+    if (artDebug) ImmersiveSheet(onDismiss = { artDebug = false }, scrollable = false, maxHeightFraction = 0.92f) {
+        ArtDebugContent(pageAlbum = album, tracks = list, headerArt = headerArt)
+    }
     val np by SongPlayer.nowPlaying
     // Same header rule as the Classic page: an artist is named only when every
     // file shares that one artist string; mixed credits read Various artists.
