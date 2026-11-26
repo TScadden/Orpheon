@@ -330,7 +330,7 @@ class CatalogTest {
         assertEquals(app.myspoti.api.Explicitness.EXPLICIT, explicitnessOf("explicit"))
         assertEquals(app.myspoti.api.Explicitness.CLEAN, explicitnessOf("cleaned"))
         assertEquals(app.myspoti.api.Explicitness.CLEAN, explicitnessOf("notExplicit"))
-        assertEquals(app.myspoti.api.Explicitness.UNKNOWN, explicitnessOf(null))
+        assertEquals(app.myspoti.api.Explicitness.UNKNOWN, explicitnessOf(null as String?))
         assertEquals(app.myspoti.api.Explicitness.UNKNOWN, explicitnessOf("somethingElse"))
         assertEquals(app.myspoti.api.Explicitness.EXPLICIT, explicitnessOf(true))
         assertEquals(app.myspoti.api.Explicitness.CLEAN, explicitnessOf(false))
