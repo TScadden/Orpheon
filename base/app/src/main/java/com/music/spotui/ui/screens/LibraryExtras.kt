@@ -73,6 +73,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -151,7 +152,10 @@ fun NameDialog(title: String, initial: String, confirm: String, onDismiss: () ->
 /**
  * "Import playlist": paste a public playlist link, read its songs, name the list, keep it on
  * this phone. Spotify links are read from Spotify's public pages (no account); an Amazon
- * Music link is told apart and said to be unsupported, as its API is closed.
+ * Music link is read from Amazon's web player rendered on this phone (also no account —
+ * see AmazonPlaylistReader), and a playlist file from a transfer service (Soundiiz,
+ * TuneMyMusic, FreeYourMusic) can be picked instead — the route that also reaches
+ * playlists no link can, Amazon's private ones included.
  */
 @Composable
 fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
@@ -161,32 +165,74 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var fetched by remember { mutableStateOf<PlaylistImport.Imported?>(null) }
+    /** Where [fetched] came from, kept with the playlist: the link, or "" for a file. */
+    var fetchedSource by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
+    var amazon by remember { mutableStateOf<com.music.spotui.data.api.AmazonReadSession?>(null) }
     val fieldColors = TextFieldDefaults.colors(
         focusedContainerColor = tone(0xFF3A3A3A), unfocusedContainerColor = tone(0xFF3A3A3A),
         focusedTextColor = AppText, unfocusedTextColor = AppText, cursorColor = Green,
         focusedIndicatorColor = Green, unfocusedIndicatorColor = Color.Transparent,
     )
+    // Whatever was read, from whichever source: complete its thin rows from the app's
+    // own catalog before it is shown or kept (CatalogCompletion), then offer the name.
+    fun complete(read: PlaylistImport.Imported, source: String) {
+        scope.launch {
+            val done = runCatching {
+                read.copy(songs = com.music.spotui.data.api.CatalogCompletion.completeFromCatalog(read.songs))
+            }.getOrDefault(read)
+            fetched = done
+            fetchedSource = source
+            name = done.name.ifBlank { context.getString(R.string.import_default_name) }
+            busy = false
+        }
+    }
+    val pickFile = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            busy = true; error = null
+            scope.launch {
+                val parsed = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val text = context.contentResolver.openInputStream(uri)
+                            ?.bufferedReader(Charsets.UTF_8)?.readText()
+                        text?.let { com.music.spotui.data.api.PlaylistCsv.parse(it, pickedFileName(context, uri)) }
+                    }.getOrNull()
+                }
+                if (parsed == null) {
+                    error = context.getString(R.string.import_file_bad)
+                    busy = false
+                } else complete(PlaylistImport.Imported(parsed.name, parsed.songs, parsed.songs.size), "")
+            }
+        }
+    }
     fun fetch() {
         when (val parsed = PlaylistLinks.parse(link)) {
             is PlaylistLink.Spotify -> {
                 busy = true; error = null
                 scope.launch {
-                    runCatching {
-                        val read = PlaylistImport.fetchSpotify(parsed.id)
-                        // A reading Spotify's API refused part of arrives thin (no
-                        // covers, albums or ISRCs): complete it from the app's own
-                        // catalog before it is shown or kept (CatalogCompletion).
-                        read.copy(songs = com.music.spotui.data.api.CatalogCompletion.completeFromCatalog(read.songs))
-                    }
-                        .onSuccess { fetched = it; name = it.name.ifBlank { context.getString(R.string.import_default_name) } }
-                        .onFailure { error = context.getString(R.string.import_failed) }
-                    busy = false
+                    // A reading Spotify's API refused part of arrives thin (no
+                    // covers, albums or ISRCs): complete() fills it from the catalog.
+                    runCatching { PlaylistImport.fetchSpotify(parsed.id) }
+                        .onSuccess { complete(it, link.trim()) }
+                        .onFailure { error = context.getString(R.string.import_failed); busy = false }
                 }
             }
-            PlaylistLink.Amazon -> error = context.getString(R.string.import_amazon)
+            is PlaylistLink.Amazon -> {
+                busy = true; error = null
+                amazon = com.music.spotui.data.api.AmazonReadSession(context, parsed.url)
+            }
             PlaylistLink.Unknown -> error = context.getString(R.string.import_bad_link)
         }
+    }
+    amazon?.let { session ->
+        AmazonImportDialog(
+            session = session,
+            onImported = { imported -> amazon = null; complete(imported, session.url) },
+            onFailed = { amazon = null; busy = false; error = context.getString(R.string.import_amazon_failed) },
+            onCancel = { amazon = null; busy = false },
+        )
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -201,6 +247,11 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
                         label = { Text(stringResource(R.string.import_link_hint), color = AppMuted) },
                         colors = fieldColors, modifier = Modifier.fillMaxWidth(),
                     )
+                    TextButton(
+                        enabled = !busy,
+                        onClick = { pickFile.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/vnd.ms-excel")) },
+                        modifier = Modifier.padding(top = 4.dp),
+                    ) { Text(stringResource(R.string.import_file_button), color = Green, fontSize = 14.sp) }
                 } else {
                     TextField(
                         value = name, onValueChange = { name = it }, singleLine = true,
@@ -220,13 +271,82 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
             if (got == null) TextButton(enabled = link.isNotBlank() && !busy, onClick = { fetch() }) {
                 Text(stringResource(R.string.import_fetch), color = Green)
             } else TextButton(enabled = name.isNotBlank(), onClick = {
-                val p = ImportedPlaylists.create(name, link.trim(), got.songs)
+                val p = ImportedPlaylists.create(name, fetchedSource, got.songs)
                 onDismiss()
                 navController.navigate(importedPlaylistRoute(p.id))
             }) { Text(stringResource(R.string.import_button), color = Green) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.lbl_cancel), color = AppText) }
+        },
+    )
+}
+
+/** A picked file's display name without its extension: a playlist file's own name for its list. */
+private fun pickedFileName(context: android.content.Context, uri: android.net.Uri): String {
+    var display: String? = null
+    runCatching {
+        context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) display = c.getString(0)
+        }
+    }
+    val raw = display ?: uri.lastPathSegment?.substringAfterLast('/').orEmpty()
+    return raw.substringBeforeLast('.', raw)
+}
+
+/**
+ * An Amazon link being read: the web player rendering in a token-size box while the
+ * read runs, shown at a real size only when Amazon answers with a bot check for the
+ * user to tap through (AmazonReadSession's NEEDS_USER), with Continue to resume it.
+ */
+@Composable
+private fun AmazonImportDialog(
+    session: com.music.spotui.data.api.AmazonReadSession,
+    onImported: (PlaylistImport.Imported) -> Unit,
+    onFailed: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    androidx.compose.runtime.DisposableEffect(session) { onDispose { session.destroy() } }
+    androidx.compose.runtime.LaunchedEffect(session) { session.run() }
+    androidx.compose.runtime.LaunchedEffect(session.phase) {
+        when (session.phase) {
+            com.music.spotui.data.api.AmazonReadSession.Phase.DONE -> session.imported?.let(onImported)
+            com.music.spotui.data.api.AmazonReadSession.Phase.FAILED -> onFailed()
+            else -> Unit
+        }
+    }
+    val needsUser = session.phase == com.music.spotui.data.api.AmazonReadSession.Phase.NEEDS_USER
+    AlertDialog(
+        onDismissRequest = onCancel,
+        containerColor = SheetColor,
+        title = {
+            Text(stringResource(if (needsUser) R.string.import_amazon_check_title else R.string.import_title), color = AppText)
+        },
+        text = {
+            Column {
+                Text(
+                    stringResource(if (needsUser) R.string.import_amazon_check_body else R.string.import_amazon_reading),
+                    color = AppMuted, fontSize = 14.sp,
+                )
+                Box(
+                    Modifier.fillMaxWidth().padding(top = 12.dp)
+                        .height(if (needsUser) 420.dp else 1.dp)
+                        .clipToBounds(),
+                ) {
+                    androidx.compose.ui.viewinterop.AndroidView(
+                        factory = { session.webView },
+                        modifier = Modifier.fillMaxWidth().height(440.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (needsUser) TextButton(onClick = { session.userContinue() }) {
+                Text(stringResource(R.string.import_amazon_continue), color = Green)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text(stringResource(R.string.lbl_cancel), color = AppText) }
         },
     )
 }

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<!-- A rendered Amazon Music playlist page, modeled on the real web player's output
+     (verified signed out, Nov 2026): the header names the playlist and declares its
+     song count; each row links its song twice through the album address carrying
+     ?trackAsin=<ASIN> (the cover picture and the title), names its artist and album
+     (as links, or as plain lines), and shows its duration as m:ss. No ISRC anywhere. -->
+<html lang="en">
+<head>
+<title>Amazon Music: Evening Drive Mix</title>
+<meta property="og:title" content="Evening Drive Mix on Amazon Music">
+</head>
+<body>
+<header class="playlist-header">
+  <h1>Evening Drive Mix</h1>
+  <div class="meta">3 SONGS • 11 MINUTES</div>
+</header>
+<div class="tracklist">
+  <div class="row" data-testid="track-row">
+    <a href="/albums/B0ALBUM001?trackAsin=B0TRACK001"><img src="https://m.media-amazon.com/images/I/51cover1.jpg" alt=""></a>
+    <a class="title" href="/albums/B0ALBUM001?trackAsin=B0TRACK001">Midnight Run</a>
+    <a class="artist" href="/artists/B0ARTIST01">The Wanderers</a>
+    <a class="album" href="/albums/B0ALBUM001">Long Road Home</a>
+    <span class="duration">3:24</span>
+  </div>
+  <div class="row" data-testid="track-row">
+    <a href="/albums/B0ALBUM002?trackAsin=B0TRACK002"><img src="https://m.media-amazon.com/images/I/51cover2.jpg" alt=""></a>
+    <a class="title" href="/albums/B0ALBUM002?trackAsin=B0TRACK002">Paper &amp; Gold</a>
+    <div class="byline">June Cartel</div>
+    <div class="albumline">Static Bloom</div>
+    <span class="duration">4:05</span>
+  </div>
+  <div class="row" data-testid="track-row">
+    <a class="title" href="/albums/B0ALBUM003?trackAsin=B0TRACK003">Slow Parade</a>
+    <a class="artist" href="/artists/B0ARTIST03">Ana Beltrán</a>
+    <a class="album" href="/albums/B0ALBUM003">Harbor Lights</a>
+    <span class="duration">2:57</span>
+  </div>
+</div>
+</body>
+</html>
