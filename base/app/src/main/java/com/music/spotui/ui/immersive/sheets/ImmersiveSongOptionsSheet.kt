@@ -116,7 +116,13 @@ fun ImmersiveSongOptionsSheet(
     val hasId = song.spotifyTrackId.isNotBlank()
     // A phone file in a list (Liked Songs): its album is the phone's files of that
     // name, never the catalog album the name happens to match.
-    val isLocalFile = com.music.spotui.data.local.LocalAlbums.isLocalRow(song.url, song.spotifyTrackId)
+    // Judged by the shared classifier at the player's strength: a phone file in any
+    // of its list forms ("spotify:local:", a bare "content://", the player's own
+    // bare "local:<id>") is local, so its album is the phone's own page.
+    val isLocalFile = com.music.spotui.data.local.LocalAlbums.isLocalSong(
+        song.url, song.spotifyTrackId,
+        if (nowPlaying) com.music.spotui.di.SongPlayer.nowPlaying.value.uri else "",
+    )
     // A Live Radio station playing right now: no queue, album or artist page of its own, but
     // (unlike a track with no Spotify id) a name and homepage worth sharing.
     val isRadio = nowPlaying && com.music.spotui.radio.RadioPlayer.current() != null

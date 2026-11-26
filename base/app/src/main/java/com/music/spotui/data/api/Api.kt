@@ -173,6 +173,20 @@ class Api constructor(
     private fun cover(images: List<Image>) = images.best(300)?.url.orEmpty()
     private fun big(images: List<Image>) = images.best(640)?.url.orEmpty()
 
+    /**
+     * A page as it shows while explicit music is off: the known-explicit songs are out
+     * of it, and how many went is kept on the page (its hidden note, [ContextPageModel.hiddenExplicit]).
+     * The page as built — and anything kept on storage from it — keeps every song; only
+     * what a screen is given is cut, so turning the setting back on brings them all back.
+     */
+    private fun ContextPageModel.explicitFiltered(): ContextPageModel {
+        val allowed = com.music.spotui.data.preferences.ExplicitPref.allowed
+        if (allowed) return this
+        val kept = com.music.spotui.data.preferences.ExplicitFilter.visible(tracks, allowed)
+        if (kept.size == tracks.size) return this
+        return copy(tracks = kept, hiddenExplicit = tracks.size - kept.size)
+    }
+
     fun songOf(t: Track): SongsModel {
         val id = t.uri.substringAfterLast(':')
         val singer = t.artists.joinToString(", ") { it.name }
@@ -184,6 +198,7 @@ class Api constructor(
             coverUri = cover(t.album?.images.orEmpty()),
             url = "episode:$id",
             explicit = t.explicit,
+            explicitStatus = t.explicitness,
             durationMs = t.durationMs.toInt(),
             addedAt = t.addedAt.orEmpty(),
             playable = t.playable,
@@ -214,6 +229,7 @@ class Api constructor(
             url = com.music.spotui.data.catalog.CatalogRuntime.PLAY_PREFIX + t.uri,
             spotifyTrackId = com.music.spotui.data.catalog.CatalogRuntime.keyOf(t.uri).orEmpty(),
             explicit = t.explicit,
+            explicitStatus = t.explicitness,
             durationMs = t.durationMs.toInt(),
             albumId = t.album?.uri.orEmpty(),
             artistIds = t.artists.map { it.uri },
@@ -227,6 +243,7 @@ class Api constructor(
             url = SongPlayer.buildSpotifyPlayQuery(id, t.name, singer),
             spotifyTrackId = id,
             explicit = t.explicit,
+            explicitStatus = t.explicitness,
             durationMs = t.durationMs.toInt(),
             albumId = t.album?.uri?.substringAfterLast(':').orEmpty(),
             addedAt = t.addedAt.orEmpty(),
@@ -470,7 +487,11 @@ class Api constructor(
                 listens.firstOrNull { it.title == r.name && it.artist == r.subtitle }?.let(::historyTrack)
             })
         add(context.getString(R.string.home_popular_week), runCatching {
-            chartDeezer.chartTracks(20).map { hit ->
+            chartDeezer.chartTracks(20)
+                // The chart states each song's explicitness (Deezer): while explicit
+                // music is off, the known-explicit ones stay off the shelf.
+                .filter { com.music.spotui.data.preferences.ExplicitPref.allowed || it.track.explicitness != app.myspoti.api.Explicitness.EXPLICIT }
+                .map { hit ->
                 val t = hit.track
                 HomeItem.Track(
                     name = t.name,
@@ -507,7 +528,7 @@ class Api constructor(
         if (query.isBlank()) { emit(Response.Success(emptyList())); return@flow }
         if (!ready()) { emit(Response.Error(notSignedIn())); return@flow }
         runCatching { api.search.tracks(query, limit = 30).items.map(::songOf) }.fold(
-            onSuccess = { emit(Response.Success(it)) },
+            onSuccess = { emit(Response.Success(com.music.spotui.data.preferences.ExplicitFilter.visible(it, com.music.spotui.data.preferences.ExplicitPref.allowed))) },
             onFailure = { Log.e("Api", "searchTracks failed", it); emit(Response.Error(it.message ?: "error")) },
         )
     }
@@ -521,7 +542,7 @@ class Api constructor(
             Log.e("Api", "searchEverything failed", it); emit(Response.Error(it.message ?: "error")); return@flow
         }
         val base = SearchResults(
-            songs = music.tracks.items.map(::songOf),
+            songs = com.music.spotui.data.preferences.ExplicitFilter.visible(music.tracks.items.map(::songOf), com.music.spotui.data.preferences.ExplicitPref.allowed),
             albums = music.albums.items.map(::albumOf),
             artists = music.artists.items.map(::artistOf),
             playlists = music.playlists.items.map(::playlistEntry),
@@ -761,6 +782,8 @@ class Api constructor(
         val page = firstReleases.first
         val avatar = big(page.artist.images)
         val top = page.topTracks.map { t -> songOf(t.track).let { if (it.coverUri.isBlank()) it.copy(coverUri = avatar) else it } to t.playcount }
+            // The artist's top tracks are a list like any other for the explicit filter.
+            .filter { !com.music.spotui.data.preferences.ExplicitFilter.hides(it.first, com.music.spotui.data.preferences.ExplicitPref.allowed) }
         SongPlayer.registerContext(top.map { it.first.url }, uri)
         val model = ArtistOverviewModel(
             id = idOf(uri),
@@ -873,7 +896,7 @@ class Api constructor(
             metaLine = context.resources.getQuantityString(R.plurals.artist_liked_songs_count, songs.size, songs.size, artistName),
             tracks = songs,
             complete = true,
-        )))
+        ).explicitFiltered()))
     }
 
     /**
@@ -935,17 +958,25 @@ class Api constructor(
      * with [full] (a pull-to-refresh), every page is read.
      */
     suspend fun getLikedPage(full: Boolean = false): Flow<Response<ContextPageModel>> = flow {
-        fun page(tracks: List<SongsModel>, complete: Boolean) = ContextPageModel(
-            uri = "spotify:collection:tracks",
-            type = "liked",
-            name = context.getString(R.string.lbl_liked_songs),
-            coverUri = "",
-            ownerName = ProfileCache.name.orEmpty(),
-            ownerAvatar = ProfileCache.imageUrl.orEmpty(),
-            metaLine = context.resources.getQuantityString(R.plurals.lbl_n_songs, withLocalLiked(tracks).size, withLocalLiked(tracks).size),
-            tracks = withLocalLiked(tracks),
-            complete = complete,
-        )
+        fun page(tracks: List<SongsModel>, complete: Boolean): ContextPageModel {
+            // The cache keeps every song; the page as shown is cut by the explicit
+            // filter, its count the visible one and the difference on the page.
+            val all = withLocalLiked(tracks)
+            val allowed = com.music.spotui.data.preferences.ExplicitPref.allowed
+            val shown = com.music.spotui.data.preferences.ExplicitFilter.visible(all, allowed)
+            return ContextPageModel(
+                uri = "spotify:collection:tracks",
+                type = "liked",
+                name = context.getString(R.string.lbl_liked_songs),
+                coverUri = "",
+                ownerName = ProfileCache.name.orEmpty(),
+                ownerAvatar = ProfileCache.imageUrl.orEmpty(),
+                metaLine = context.resources.getQuantityString(R.plurals.lbl_n_songs, shown.size, shown.size),
+                hiddenExplicit = all.size - shown.size,
+                tracks = shown,
+                complete = complete,
+            )
+        }
         if (LikedCache.tracks == null) LikedCache.tracks = withContext(Dispatchers.IO) { ScreenCache.liked.read() }
         LikedCache.tracks?.let { emit(Response.Success(page(it, true))) } ?: emit(Response.Loading())
         if (!ready()) {
@@ -1010,6 +1041,8 @@ class Api constructor(
         durationMs = s.durationMs.toInt(),
         rowUid = s.key,
         isrc = s.isrc,
+        explicit = s.explicit == app.myspoti.api.Explicitness.EXPLICIT,
+        explicitStatus = s.explicit,
     )
 
     /**
@@ -1035,7 +1068,7 @@ class Api constructor(
             metaLine = context.resources.getQuantityString(R.plurals.lbl_n_songs, p.items.size, p.items.size),
             tracks = p.items.map(::importedSongOf),
             complete = true,
-        )))
+        ).explicitFiltered()))
     }
 
     /**
@@ -1053,7 +1086,7 @@ class Api constructor(
      * is, and a later run may try again.
      */
     private fun maybeRepairImported(p: ImportedPlaylist) {
-        if (p.items.none { it.spotifyTrackId.isNotBlank() && (it.isrc.isBlank() || it.coverUrl.isBlank() || it.album.isBlank()) }) return
+        if (p.items.none { it.spotifyTrackId.isNotBlank() && (it.isrc.isBlank() || it.coverUrl.isBlank() || it.album.isBlank() || it.explicit == app.myspoti.api.Explicitness.UNKNOWN) }) return
         val link = PlaylistLinks.parse(p.sourceUrl) as? PlaylistLink.Spotify ?: return
         if (!importRepairAttempted.add(p.id)) return
         importRepairScope.launch {
@@ -1127,7 +1160,7 @@ class Api constructor(
         val saved = if (stored && onSpotify) withContext(Dispatchers.IO) { ScreenCache.albumPage(albumId).read() } else null
         if (saved != null) {
             SongPlayer.registerContext(saved.tracks.map { it.url }, uri)
-            emit(Response.Success(saved))
+            emit(Response.Success(saved.explicitFiltered()))
         }
         if (!ready()) { if (saved == null) emit(Response.Error(notSignedIn())); return@flow }
         val (album, tracks) = runCatching {
@@ -1172,12 +1205,12 @@ class Api constructor(
             ScreenCache.albumPage(albumId).write(page)
             ScreenCache.pruneAlbumPages(ALBUM_PAGES_KEPT)
         }
-        emit(Response.Success(page))
+        emit(Response.Success(page.explicitFiltered()))
         val avatar = firstArtist?.let { runCatching { api.catalog.artist(it.uri) }.getOrNull() }?.images?.let(::cover).orEmpty()
         if (avatar.isNotBlank() && avatar != page.ownerAvatar) {
             val withAvatar = page.copy(ownerAvatar = avatar)
             if (onSpotify) ScreenCache.albumPage(albumId).write(withAvatar)
-            emit(Response.Success(withAvatar))
+            emit(Response.Success(withAvatar.explicitFiltered()))
         }
     }
 
@@ -1239,7 +1272,9 @@ class Api constructor(
             val meta = listOf(saves, durationAndCount).filter { it.isNotBlank() }.joinToString(" • ")
             // A playlist without a cover of its own shows the mosaic of its songs' albums, as in the official app.
             val cover = header.coverUri.ifBlank { com.music.spotui.ui.components.mosaicCoverFor(songs.take(200).map { it.coverUri }) }
-            return Response.Success(header.copy(coverUri = cover, metaLine = meta, tracks = songs.toList(), complete = done))
+            // The page as shown is cut by the explicit filter; [songs] itself (and the
+            // fresh copy kept from it above) keeps every song.
+            return Response.Success(header.copy(coverUri = cover, metaLine = meta, tracks = songs.toList(), complete = done).explicitFiltered())
         }
         if (firstPage == null) {
             songs += fresh!!

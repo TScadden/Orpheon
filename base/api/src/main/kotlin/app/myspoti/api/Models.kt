@@ -9,6 +9,15 @@ data class Image(val url: String, val width: Int? = null, val height: Int? = nul
 fun List<Image>.best(minPx: Int): Image? =
     filter { (it.width ?: 0) >= minPx }.minByOrNull { it.width ?: 0 } ?: maxByOrNull { it.width ?: 0 }
 
+/**
+ * What a source states about a recording's explicitness. EXPLICIT only when the source
+ * says so; CLEAN only when it says the opposite (iTunes' "cleaned" / "notExplicit",
+ * Deezer's explicit_lyrics false); UNKNOWN when it says nothing — and UNKNOWN is never
+ * badged and never filtered, so a song no source has judged (a phone file, say) is
+ * always treated as ordinary.
+ */
+enum class Explicitness { EXPLICIT, CLEAN, UNKNOWN }
+
 data class ArtistRef(val uri: Uri, val name: String)
 
 data class AlbumRef(val uri: Uri, val name: String, val images: List<Image> = emptyList())
@@ -20,6 +29,8 @@ data class Track(
     val artists: List<ArtistRef>,
     val album: AlbumRef?,
     val explicit: Boolean = false,
+    /** The tri-state behind [explicit]: derived from it when a source states only the flag. */
+    val explicitness: Explicitness = if (explicit) Explicitness.EXPLICIT else Explicitness.UNKNOWN,
     val playable: Boolean = true,
     /** Position in a playlist; needed to remove or move this exact row. */
     val uid: String? = null,

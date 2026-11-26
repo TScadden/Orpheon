@@ -65,21 +65,25 @@ object OfflineDownloader {
          * playlist's read does): the download match turns on it, so it is used instead of
          * a live lookup. Empty when unknown; requests saved before it was kept read as "". */
         val isrc: String = "",
+        /** The row's known-explicit mark, so the downloaded song keeps it (the queue
+         * skips known-explicit songs while explicit music is off). Requests saved
+         * before it was kept read as false. */
+        val explicit: Boolean = false,
     ) {
         fun toJson(): JSONObject = JSONObject().put("id", trackId).put("title", title).put("artist", artist)
             .put("album", album).put("albumId", albumId).put("duration", durationMs).put("cover", coverUrl)
-            .put("quality", quality).put("isrc", isrc)
+            .put("quality", quality).put("isrc", isrc).put("explicit", explicit)
 
         companion object {
             fun of(s: SongsModel) = Request(
                 trackId = s.spotifyTrackId, title = s.title, artist = s.singer, album = s.album,
                 albumId = s.albumId, durationMs = s.durationMs.toLong(), coverUrl = s.coverUri,
-                isrc = s.isrc,
+                isrc = s.isrc, explicit = s.knownExplicit,
             )
             fun fromJson(o: JSONObject) = Request(
                 o.getString("id"), o.optString("title"), o.optString("artist"), o.optString("album"),
                 o.optString("albumId"), o.optLong("duration"), o.optString("cover"), o.optString("quality"),
-                o.optString("isrc"),
+                o.optString("isrc"), o.optBoolean("explicit"),
             )
         }
     }
@@ -361,7 +365,7 @@ object OfflineDownloader {
                 OfflineTrack(
                     trackId = r.trackId, title = meta.title, artist = meta.artist, album = meta.album,
                     albumId = meta.albumId, durationMs = meta.durationMs, coverUrl = meta.coverUrl,
-                    file = out.name, cover = cover,
+                    file = out.name, cover = cover, explicit = meta.explicit,
                     source = if (quality == com.music.spotui.data.preferences.DownloadQuality.SMALL && file.lossy == null)
                         "${providerWithoutQuality(file.providerName)} AAC ${AacTranscoder.BITRATE / 1000} kbit/s" else file.provider,
                     verified = file.isrcMatched,
@@ -534,6 +538,8 @@ object OfflineDownloader {
         val durationMs: Long, val coverUrl: String, val isrc: String?,
         /** The id the download source is asked for, when it differs from the request's own key. */
         val downloadId: String = "",
+        /** Known explicit, from the request's row or the track record read for it. */
+        val explicit: Boolean = false,
     )
 
     /**
@@ -558,6 +564,7 @@ object OfflineDownloader {
             durationMs = r.durationMs.takeIf { it > 0 } ?: t?.durationMs ?: 0L,
             coverUrl = cover,
             isrc = isrc,
+            explicit = r.explicit || t?.explicit == true || t?.explicitness == app.myspoti.api.Explicitness.EXPLICIT,
         )
         val resolved = if (t == null) catalogMeta(r, meta) else meta
         return resolved.also { if (it.title.isBlank() || it.artist.isBlank()) throw Unavailable("no track metadata") }
@@ -590,6 +597,7 @@ object OfflineDownloader {
             DownloadMeta(
                 downloadId = r.trackId, isrc = meta.isrc, title = meta.title, artist = meta.artist,
                 album = meta.album, albumId = meta.albumId, durationMs = meta.durationMs, coverUrl = meta.coverUrl,
+                explicitness = if (meta.explicit) app.myspoti.api.Explicitness.EXPLICIT else app.myspoti.api.Explicitness.UNKNOWN,
             ),
             hit, spotifyHit,
         )
@@ -598,6 +606,7 @@ object OfflineDownloader {
             title = dm.title, artist = dm.artist, album = dm.album, albumId = dm.albumId,
             durationMs = dm.durationMs, coverUrl = dm.coverUrl.orEmpty(), isrc = dm.isrc,
             downloadId = dm.downloadId,
+            explicit = meta.explicit || dm.explicitness == app.myspoti.api.Explicitness.EXPLICIT,
         )
     }
 

@@ -106,7 +106,19 @@ object SpotifyEmbed {
             key = "", spotifyTrackId = uri.substringAfterLast(':'),
             title = o.getString("title"), artist = o.optString("subtitle"),
             album = "", durationMs = if (raw in 1..9_999) raw * 1000 else raw, coverUrl = "",
+            explicit = explicitOf(o, "isExplicit"),
         )
+    }
+
+    /**
+     * A stated explicit flag of a Spotify reading (the embed's `isExplicit`, the API's
+     * `explicit`) as the tri-state: stated true is EXPLICIT, stated false is CLEAN, and
+     * an absent flag is UNKNOWN — never a guess.
+     */
+    fun explicitOf(o: JSONObject, key: String): app.myspoti.api.Explicitness = when {
+        !o.has(key) || o.isNull(key) -> app.myspoti.api.Explicitness.UNKNOWN
+        o.optBoolean(key) -> app.myspoti.api.Explicitness.EXPLICIT
+        else -> app.myspoti.api.Explicitness.CLEAN
     }
 
     /** One `GET /v1/playlists/<id>/tracks` answer → its songs (removed tracks skipped), its total, whether more pages follow. */
@@ -134,6 +146,7 @@ object SpotifyEmbed {
                     // The API's track object carries the recording's ISRC (the embed page
                     // never does): kept normalized, as every other ISRC in the app is.
                     isrc = t.optJSONObject("external_ids")?.optString("isrc")?.let(OfflineDownloader::normalizeIsrc).orEmpty(),
+                    explicit = explicitOf(t, "explicit"),
                 )
             }.getOrNull()
         }
@@ -157,6 +170,8 @@ object SpotifyEmbed {
         durationMs = rich.durationMs.takeIf { it > 0 } ?: base.durationMs,
         coverUrl = rich.coverUrl.ifBlank { base.coverUrl },
         isrc = rich.isrc.ifBlank { base.isrc },
+        // The API's judgement wins; the embed's stands where the API states none.
+        explicit = if (rich.explicit != app.myspoti.api.Explicitness.UNKNOWN) rich.explicit else base.explicit,
     )
 
     /**

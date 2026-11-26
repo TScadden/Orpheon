@@ -13,6 +13,8 @@ data class ContextPageModel(
     val ownerUri: String = "",
     val metaLine: String = "",
     val explicit: Boolean = false,
+    /** Songs the explicit filter kept off this page (0 while explicit music is allowed): the page's hidden note. */
+    val hiddenExplicit: Int = 0,
     val tracks: List<SongsModel> = emptyList(),
     val complete: Boolean = true,
     /** A Spotify Blend: its page shows the members and the taste match. */

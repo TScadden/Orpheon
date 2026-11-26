@@ -2,7 +2,9 @@ package com.music.spotui.data.local
 
 import android.net.Uri
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -136,6 +138,54 @@ class LocalAlbumsTest {
         assertEquals(
             LocalAlbums.AlbumTap.LOCAL_NO_ALBUM,
             LocalAlbums.albumTap(url = "", spotifyTrackId = "", nowPlayingUri = "local:123", albumName = ""),
+        )
+    }
+
+    // The shared classifier (LocalAlbums.isLocalSong) both songs' menus judge
+    // by: every address form a phone file takes in the lists is local, and a
+    // row carrying a catalog id never is. Tyson's report, Nov 25 2026: the
+    // menu of his local "Unfaithful" (album "The Kid Laroi Unreleased") opened
+    // the catalog album "F*CK LOVE 3+: OVER YOU" — its row failed the menus'
+    // old weak test and fell into the catalog route.
+    @Test fun isLocalSongCoversEveryPhoneFileForm() {
+        // The play queue's address for a file (album pages, playlists, Liked Songs).
+        assertTrue(LocalAlbums.isLocalSong("local:content://media/external/audio/media/123", ""))
+        // The bare MediaStore id form.
+        assertTrue(LocalAlbums.isLocalSong("local:123", ""))
+        // A file liked into Liked Songs.
+        assertTrue(LocalAlbums.isLocalSong("spotify:local:123", ""))
+        // A local playlist's own address for a file.
+        assertTrue(LocalAlbums.isLocalSong("content://media/external/audio/media/123", ""))
+        // No queue row to judge by: the player's own address is the bare id form.
+        assertTrue(LocalAlbums.isLocalSong("", "", nowPlayingUri = "local:123"))
+        assertTrue(LocalAlbums.isLocalSong("local:content://media/external/audio/media/123", "", nowPlayingUri = "local:123"))
+    }
+
+    @Test fun isLocalSongKeepsCatalogRowsAndDownloadsOut() {
+        // A catalog song.
+        assertFalse(LocalAlbums.isLocalSong("spotify:track:4uLU6hMCjMI75M1A2tKUQC", "4uLU6hMCjMI75M1A2tKUQC"))
+        // A catalog song played through an extension stream.
+        assertFalse(LocalAlbums.isLocalSong("myspoti-ext://track/4uLU6hMCjMI75M1A2tKUQC", "4uLU6hMCjMI75M1A2tKUQC"))
+        // A download: a local-looking address, but the row carries its Spotify id,
+        // and its own address's id is below zero.
+        assertFalse(LocalAlbums.isLocalSong("local:file:///data/user/0/app.orpheon.beta.clean/files/offline/song.mp3", "4uLU6hMCjMI75M1A2tKUQC"))
+        assertFalse(LocalAlbums.isLocalSong("", "", nowPlayingUri = "local:-12345"))
+        // The local forms stop being local the moment a catalog id rides along.
+        assertFalse(LocalAlbums.isLocalSong("content://media/external/audio/media/123", "4uLU6hMCjMI75M1A2tKUQC"))
+        assertFalse(LocalAlbums.isLocalSong("spotify:local:123", "4uLU6hMCjMI75M1A2tKUQC"))
+        // Nothing at all.
+        assertFalse(LocalAlbums.isLocalSong("", ""))
+    }
+
+    @Test fun albumTapFollowsTheSharedClassifierForTheMenuForms() {
+        // The two forms the menus used to miss reach the local album now.
+        assertEquals(
+            LocalAlbums.AlbumTap.LOCAL,
+            LocalAlbums.albumTap(url = "spotify:local:123", spotifyTrackId = "", nowPlayingUri = "", albumName = "The Kid Laroi Unreleased"),
+        )
+        assertEquals(
+            LocalAlbums.AlbumTap.LOCAL,
+            LocalAlbums.albumTap(url = "content://media/external/audio/media/123", spotifyTrackId = "", nowPlayingUri = "", albumName = "The Kid Laroi Unreleased"),
         )
     }
 

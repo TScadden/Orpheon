@@ -13,6 +13,13 @@ data class SongsModel(
     val spotifyTrackId : String = "",
     // Whether the Spotify track is the explicit version (the E badge).
     val explicit : Boolean = false,
+    // What the row's source states about explicitness, when it states anything:
+    // EXPLICIT only on a stated judgement, CLEAN on a stated opposite, UNKNOWN when
+    // nothing is stated (phone files, older caches). UNKNOWN is never badged and
+    // never hidden by the explicit filter. Derived from [explicit] when a builder
+    // sets only the flag.
+    val explicitStatus : app.myspoti.api.Explicitness =
+        if (explicit) app.myspoti.api.Explicitness.EXPLICIT else app.myspoti.api.Explicitness.UNKNOWN,
     // Track length in ms (from Spotify), 0 when unknown.
     val durationMs : Int = 0,
     // Spotify album id of the track, when known (opens the album page by id).
@@ -50,4 +57,7 @@ data class SongsModel(
 
     /** A podcast episode (url = "episode:<raw id>"), not a music track. */
     val isEpisode : Boolean get() = url.startsWith("episode:")
+
+    /** Known explicit: a source said so, by the flag or by the tri-state. The badge and the filter judge by this. */
+    val knownExplicit : Boolean get() = explicit || explicitStatus == app.myspoti.api.Explicitness.EXPLICIT
 }

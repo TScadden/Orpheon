@@ -5,6 +5,7 @@ import app.myspoti.api.Album
 import app.myspoti.api.AlbumRef
 import app.myspoti.api.Artist
 import app.myspoti.api.ArtistRef
+import app.myspoti.api.Explicitness
 import app.myspoti.api.Image
 import app.myspoti.api.Page
 import app.myspoti.api.Track
@@ -71,7 +72,8 @@ class ITunes(private val fetch: Fetch, private val country: String = "US", priva
             durationMs = o.long("trackTimeMillis") ?: 0,
             artists = listOf(ArtistRef(uri("artist", o.long("artistId")), o.str("artistName").orEmpty())),
             album = o.long("collectionId")?.let { AlbumRef(uri("album", it), o.str("collectionName").orEmpty(), art(o)) },
-            explicit = o.str("trackExplicitness") == "explicit",
+            explicit = explicitnessOf(o.str("trackExplicitness")) == Explicitness.EXPLICIT,
+            explicitness = explicitnessOf(o.str("trackExplicitness")),
         ),
     )
 

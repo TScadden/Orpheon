@@ -5,6 +5,7 @@ import app.myspoti.api.Album
 import app.myspoti.api.AlbumRef
 import app.myspoti.api.Artist
 import app.myspoti.api.ArtistRef
+import app.myspoti.api.Explicitness
 import app.myspoti.api.Image
 import app.myspoti.api.Page
 import app.myspoti.api.Track
@@ -220,7 +221,8 @@ class ScriptProvider(
                 durationMs = o.long("duration_ms") ?: 0,
                 artists = credits(o),
                 album = album,
-                explicit = o.bool("explicit") ?: false,
+                explicit = explicitnessOf(o.bool("explicit")) == Explicitness.EXPLICIT,
+                explicitness = explicitnessOf(o.bool("explicit")),
             ),
             Match.isrc(o.str("isrc")),
         )

@@ -137,7 +137,9 @@ fun ImmersiveLocalAlbumScreen(navController: NavController, artist: String, albu
             ImmersiveListRow(
                 title = t.title,
                 subtitle = t.artist.ifBlank { null },
-                imageUrl = t.artUri.toString(),
+                // Through the art chain like every other surface: a track with no art
+                // of its own shows the album's set or borrowed cover, not a placeholder.
+                imageUrl = LocalCovers.effectiveArt(t.uri.toString(), t.album, t.artUri.toString()),
                 round = false,
                 playing = current && SongPlayer.isPlaying(),
                 onClick = { LocalPlayer.play(list, index, context = album) },

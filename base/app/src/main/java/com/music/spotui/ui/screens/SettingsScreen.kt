@@ -177,6 +177,12 @@ fun SettingsScreen(navController: NavController) {
                 onChecked = { com.music.spotui.data.preferences.AutoplayPref.set(ctx, it) },
             )
             OptionRow(
+                label = stringResource(R.string.settings_explicit_title),
+                detail = stringResource(R.string.settings_explicit_detail),
+                checked = com.music.spotui.data.preferences.ExplicitPref.allowed,
+                onChecked = { com.music.spotui.data.preferences.ExplicitPref.set(ctx, it) },
+            )
+            OptionRow(
                 label = stringResource(R.string.myspoti_shuffle_title),
                 detail = stringResource(R.string.myspoti_shuffle_detail),
                 checked = com.music.spotui.data.preferences.AppShufflePref.on,

@@ -39,6 +39,10 @@ data class ImportedSong(
      * a playlist file's track id): the row's identity at its own source, and the store's
      * way of telling two id-less rows of one song apart. "" when unknown. */
     val asin: String = "",
+    /** What the source states about the song's explicitness (Spotify's reads state it,
+     * the catalog completion can add it): UNKNOWN when nothing states it — playlists
+     * stored before it was kept read as UNKNOWN, and UNKNOWN is never badged or hidden. */
+    val explicit: app.myspoti.api.Explicitness = app.myspoti.api.Explicitness.UNKNOWN,
 ) {
 
     /** How this song is told apart inside one playlist: its Spotify id, else its ASIN,
@@ -161,11 +165,13 @@ object ImportedPlaylists {
                     val isrc = if (s.isrc.isBlank()) fresh.isrc else s.isrc
                     val cover = if (s.coverUrl.isBlank()) fresh.coverUrl else s.coverUrl
                     val album = if (s.album.isBlank()) fresh.album else s.album
-                    if (isrc == s.isrc && cover == s.coverUrl && album == s.album) s
+                    // An unjudged song takes the reading's judgement; a stated one stands.
+                    val explicit = if (s.explicit == app.myspoti.api.Explicitness.UNKNOWN) fresh.explicit else s.explicit
+                    if (isrc == s.isrc && cover == s.coverUrl && album == s.album && explicit == s.explicit) s
                     else {
                         changed = true
                         repaired += s.spotifyTrackId
-                        s.copy(isrc = isrc, coverUrl = cover, album = album)
+                        s.copy(isrc = isrc, coverUrl = cover, album = album, explicit = explicit)
                     }
                 }
                 if (changed) playlists[id] = p.copy(items = items)
@@ -189,11 +195,14 @@ object ImportedPlaylists {
 
     private fun songJson(s: ImportedSong) = JSONObject().put("key", s.key).put("track", s.spotifyTrackId)
         .put("title", s.title).put("artist", s.artist).put("album", s.album).put("duration", s.durationMs).put("cover", s.coverUrl)
-        .put("isrc", s.isrc).put("asin", s.asin)
+        .put("isrc", s.isrc).put("asin", s.asin).put("explicit", s.explicit.name)
 
     private fun songOf(o: JSONObject) = ImportedSong(o.getString("key"), o.getString("track"), o.optString("title"),
         o.optString("artist"), o.optString("album"), o.optLong("duration"), o.optString("cover"), o.optString("isrc"),
-        o.optString("asin"))
+        o.optString("asin"),
+        // Absent in files written before it was kept: unjudged, never a guess.
+        runCatching { app.myspoti.api.Explicitness.valueOf(o.optString("explicit")) }
+            .getOrDefault(app.myspoti.api.Explicitness.UNKNOWN))
 
     internal fun write(): String {
         val lists = JSONArray()

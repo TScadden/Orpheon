@@ -35,6 +35,9 @@ data class LocalTrack(
     val speech: Boolean = false,
     /** The stream's MIME type when its address does not tell it (an HLS radio station), null otherwise. */
     val mimeType: String? = null,
+    /** Known explicit (a source stated it): a queue reaching this track skips it while
+     * explicit music is off. False for the phone's own files — nothing states theirs. */
+    val explicit: Boolean = false,
 )
 
 /** The device's music files, read through MediaStore (no file access beyond audio). */
