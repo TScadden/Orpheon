@@ -213,6 +213,8 @@ private fun UpdatePrompt() {
         com.music.spotui.data.api.AppUpdater.State.NeedsPermission -> res.getString(app.myspoti.engine.R.string.update_needs_permission)
         is com.music.spotui.data.api.AppUpdater.State.Failed ->
             if (s.onlyByHand) s.message else res.getString(app.myspoti.engine.R.string.update_failed, s.message)
+        // The space sentence stands on its own: shown exactly as written.
+        is com.music.spotui.data.api.AppUpdater.State.NoSpace -> s.message
         com.music.spotui.data.api.AppUpdater.State.Idle -> null
     }
     val busy = state is com.music.spotui.data.api.AppUpdater.State.Downloading || state == com.music.spotui.data.api.AppUpdater.State.Installing
@@ -226,6 +228,7 @@ private fun UpdatePrompt() {
             com.music.spotui.data.api.AppUpdater.State.NeedsPermission -> app.myspoti.engine.R.string.update_allow
             is com.music.spotui.data.api.AppUpdater.State.Failed ->
                 if (byHand) app.myspoti.engine.R.string.sys_update_open_page else app.myspoti.engine.R.string.update_retry
+            is com.music.spotui.data.api.AppUpdater.State.NoSpace -> app.myspoti.engine.R.string.update_retry
             else -> app.myspoti.engine.R.string.lbl_update
         }),
         onUpdate = {
@@ -280,7 +283,7 @@ private fun UpdateDialog(
                 modifier = Modifier.padding(top = 18.dp),
             )
             androidx.compose.material3.Text(
-                "Myspoti $version", color = AppText.copy(alpha = 0.7f),
+                "Scadify $version", color = AppText.copy(alpha = 0.7f),
                 fontFamily = com.music.spotui.ui.theme.AppSans, fontSize = 15.sp, modifier = Modifier.padding(top = 6.dp),
             )
             // What's new (the release's CHANGELOG section), scrollable if long.

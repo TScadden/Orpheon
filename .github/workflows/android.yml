@@ -32,6 +32,13 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
+      # Brand gate: the display name is Scadify; a "Myspoti" display literal in the apps'
+      # UI surfaces fails the build (tools/check_brand.py defines the scanned paths and
+      # the allowlisted functional exceptions — log tags, HTTP User-Agents, ...).
+      - name: Brand gate
+        working-directory: .
+        run: python3 tools/check_brand.py
+
       # Unit tests of every module that has them: the Android modules (app, host-android) run
       # testDebugUnitTest, the JVM modules (api, catalog, extensions, pass, automix) run test.
       - name: Unit tests

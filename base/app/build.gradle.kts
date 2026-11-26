@@ -54,11 +54,11 @@ android {
     // Scadify is this fork's display name only: the ids stay, so installs and the
     // extension store are unaffected. Origin: Orpheon/Myspoti by kota-zo, GPL-3.0.)
     // Local builds (no version given) are on the beta side, like the phone test builds.
-    // Scadify's own numbering: the default is the current shipped build's number ("16" =
-    // v16). The in-app updater compares versionNames numerically and requires the release's
+    // Scadify's own numbering: the default is the current shipped build's number ("17" =
+    // v17). The in-app updater compares versionNames numerically and requires the release's
     // APK to carry the release's number, so bump this default (and the versionCode default
     // below, 200 + the number) with every shipped version.
-    val version = (findProperty("appVersionName") as String?) ?: "16"
+    val version = (findProperty("appVersionName") as String?) ?: "17"
     // "-beta" as in UpdateChecker.isBeta, one predicate for the app id, the label and the log stripping.
     val beta = findProperty("appVersionName") == null || version.contains("-beta")
     defaultConfig {
@@ -69,9 +69,9 @@ android {
         minSdk = 29
         targetSdk = 36
         // CI release builds pass the tag's version (-PappVersionName / -PappVersionCode).
-        // Scadify's shipped builds take the defaults: 200 + the version number (v16 = 216),
+        // Scadify's shipped builds take the defaults: 200 + the version number (v17 = 217),
         // always above the previous build's, so a new APK installs over the old one.
-        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 216
+        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 217
         versionName = version
         // GitHub "owner/repo" whose releases the app checks for updates; empty = off
         // (local builds). CI sets it to the repository it builds.

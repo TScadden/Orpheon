@@ -37,6 +37,12 @@ object WearUpdater {
         /** Android needs "Install unknown apps" allowed for Scadify first. */
         data object NeedsPermission : State
         /**
+         * Not enough free space for the update, seen before anything was downloaded
+         * (or reported by the installer afterwards). [message] is the whole sentence
+         * the prompt shows, as-is — not wrapped in the generic failure frame.
+         */
+        data class NoSpace(val message: String) : State
+        /**
          * [onlyByHand]: Android refused the APK over the installed app (signed with another key,
          * or another package): retrying cannot help, the APK has to be put on the watch by hand.
          */
@@ -74,6 +80,19 @@ object WearUpdater {
     suspend fun update(context: Context, release: WearUpdateChecker.Release) {
         val app = context.applicationContext
         if (!canInstall(app)) { _state.value = State.NeedsPermission; return }
+        // Fail fast on space, before a byte moves: the staged download and the
+        // installer's own staging copy coexist during the swap, so an update needs
+        // about twice its size free (the phone's v16 install died at the installer
+        // with INSTALL_FAILED_INSUFFICIENT_STORAGE after a full download). A failed
+        // StatFs read must never block an update: the check then simply passes.
+        if (release.sizeBytes > 0) {
+            val usable = runCatching { android.os.StatFs(app.cacheDir.path).availableBytes }.getOrDefault(Long.MAX_VALUE)
+            val shortfallMb = wearUpdateSpaceShortfallMb(usable, release.sizeBytes)
+            if (shortfallMb > 0) {
+                _state.value = State.NoSpace(app.getString(R.string.wear_update_no_space, shortfallMb))
+                return
+            }
+        }
         _state.value = State.Downloading(-1f)
         val apk = File(File(app.cacheDir, "updates"), "scadify-watch-${release.version}.apk")
         val result = runCatching {
@@ -170,12 +189,64 @@ object WearUpdater {
                 // On success this process is replaced by the new version.
                 PackageInstaller.STATUS_SUCCESS -> _state.value = State.Idle
                 PackageInstaller.STATUS_FAILURE_ABORTED -> _state.value = State.Idle
-                PackageInstaller.STATUS_FAILURE_CONFLICT, PackageInstaller.STATUS_FAILURE_INCOMPATIBLE ->
-                    _state.value = State.Failed(context.getString(R.string.wear_update_conflict), onlyByHand = true)
-                else -> _state.value = State.Failed(
-                    intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "install status $status",
-                )
+                else -> {
+                    // The raw installer text stays in the log; the prompt gets a plain
+                    // sentence (a raw "INSTALL_FAILED_..." string is what the phone showed).
+                    val raw = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
+                    android.util.Log.w("WearUpdater", "install failed: status $status: $raw")
+                    _state.value = when (wearUpdateFailureKind(status, raw)) {
+                        WearUpdateFailureKind.STORAGE ->
+                            State.NoSpace(context.getString(R.string.wear_update_no_space_install))
+                        WearUpdateFailureKind.MISMATCH ->
+                            State.Failed(context.getString(R.string.wear_update_mismatch), onlyByHand = true)
+                        WearUpdateFailureKind.OTHER ->
+                            State.Failed(context.getString(R.string.wear_update_install_failed_plain))
+                    }
+                }
             }
         }
+    }
+}
+
+/** Bytes that must be free before an update of [apkBytes] starts: the staged
+ *  download and the installer's own staging copy coexist during the swap. */
+internal fun wearUpdateSpaceRequiredBytes(apkBytes: Long): Long = apkBytes * 2
+
+/**
+ * Whole MB the user still has to free before an update of [apkBytes] fits in
+ * [usableBytes] — 0 when it fits. Rounded up to a whole 10 MB so the number
+ * asked for carries a little slack for the installer's own variance.
+ */
+internal fun wearUpdateSpaceShortfallMb(usableBytes: Long, apkBytes: Long): Long {
+    val missing = wearUpdateSpaceRequiredBytes(apkBytes) - usableBytes
+    if (missing <= 0) return 0
+    val mb = (missing + 999_999) / 1_000_000
+    return (mb + 9) / 10 * 10
+}
+
+/** What an installer failure means, in the prompt's terms. */
+internal enum class WearUpdateFailureKind { STORAGE, MISMATCH, OTHER }
+
+/**
+ * Classifies a PackageInstaller failure from its status code and the raw
+ * EXTRA_STATUS_MESSAGE (which carries the "INSTALL_FAILED_..." name). STORAGE:
+ * the watch ran out of room. MISMATCH: the APK cannot go over the installed
+ * app (invalid APK, signature or provider conflicts) — retrying cannot help.
+ * Everything else is OTHER.
+ */
+internal fun wearUpdateFailureKind(status: Int, rawMessage: String?): WearUpdateFailureKind {
+    val raw = rawMessage ?: ""
+    return when {
+        status == PackageInstaller.STATUS_FAILURE_STORAGE ||
+            "INSTALL_FAILED_INSUFFICIENT_STORAGE" in raw -> WearUpdateFailureKind.STORAGE
+        status == PackageInstaller.STATUS_FAILURE_CONFLICT ||
+            status == PackageInstaller.STATUS_FAILURE_INCOMPATIBLE ||
+            status == PackageInstaller.STATUS_FAILURE_INVALID ||
+            "INSTALL_FAILED_INVALID_APK" in raw ||
+            "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in raw ||
+            "INSTALL_FAILED_CONFLICTING_PROVIDER" in raw ||
+            "INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES" in raw ||
+            "INSTALL_PARSE_FAILED_BAD_MANIFEST" in raw -> WearUpdateFailureKind.MISMATCH
+        else -> WearUpdateFailureKind.OTHER
     }
 }
