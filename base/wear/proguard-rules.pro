@@ -19,3 +19,12 @@
     public static final android.os.Parcelable$Creator CREATOR;
 }
 -keep class com.google.android.gms.** { *; }
+# Scadify v19: ExtensionRuntime's static initializer loads the script prelude by a
+# package-relative resource name — ExtensionRuntime::class.java.getResource("prelude.js")
+# resolves against the class's runtime package. R8 renamed the class into the default
+# package in v18 (it was "an0" in the shipped mapping), the lookup found nothing, the
+# initializer threw, and every extension failed to load on the watch ("extension … did
+# not load: an0"). Keep the class's name so the lookup resolves as written; the class
+# is the only one in the shipped watch build with this pattern (the catalog module's
+# two like it do not ship on the watch).
+-keepnames class app.myspoti.extensions.ExtensionRuntime
