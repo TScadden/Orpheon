@@ -56,6 +56,7 @@ import com.music.spotui.data.api.SpotifySync
 import com.music.spotui.ui.theme.AppMuted
 import com.music.spotui.ui.theme.AppText
 import com.music.spotui.ui.theme.tone
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 
 /**
@@ -71,12 +72,16 @@ fun AddCollectionToPlaylistSheet(sourceUri: String, title: String, onDismiss: ()
     val scope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var playlists by remember { mutableStateOf(EditablePlaylists.cachedWithCovers()) }
+    // This phone's own playlists (imported, then local): offered alongside the account's.
+    var phoneLists by remember { mutableStateOf(EditablePlaylists.phonePlaylists()) }
     var query by remember { mutableStateOf("") }
     var reading by remember { mutableStateOf(false) }
     var asking by remember { mutableStateOf<Pair<EditablePlaylist, MergePlan>?>(null) }
-    LaunchedEffect(Unit) { playlists = EditablePlaylists.loadWithCovers() }
-    val shown = remember(playlists, query) {
-        playlists.orEmpty().filter { "spotify:playlist:${it.id}" != sourceUri && matchesFind(query, it.name) }
+    LaunchedEffect(Unit) { playlists = EditablePlaylists.loadWithCovers(); phoneLists = EditablePlaylists.phonePlaylists() }
+    val shown = remember(playlists, phoneLists, query) {
+        playlists.orEmpty().filter { "spotify:playlist:${it.id}" != sourceUri && matchesFind(query, it.name) } +
+            phoneLists.filter { matchesFind(query, it.name) &&
+                !(it.source == com.music.spotui.data.api.PlaylistSource.IMPORTED && sourceUri == "scadify:imported:${it.id}") }
     }
 
     fun say(text: String) = Handler(Looper.getMainLooper()).post { Toast.makeText(context, text, Toast.LENGTH_SHORT).show() }
@@ -109,8 +114,48 @@ fun AddCollectionToPlaylistSheet(sourceUri: String, title: String, onDismiss: ()
         }
     }
 
+    /** The source's songs as models, read from its page: an album's or playlist's tracks. */
+    suspend fun sourceSongs(uri: String): List<com.music.spotui.data.entity.SongsModel>? {
+        val page = when {
+            uri.startsWith("spotify:album:") -> com.music.spotui.di.Graph.api.getAlbumPage(uri.substringAfterLast(':'))
+            uri.startsWith("spotify:playlist:") -> com.music.spotui.di.Graph.api.getPlaylistPage(uri.substringAfterLast(':'))
+            uri.startsWith("scadify:imported:") -> com.music.spotui.di.Graph.api.getImportedPlaylistPage(uri.removePrefix("scadify:imported:"))
+            else -> return null
+        }
+        return page.toList().mapNotNull { (it as? com.music.spotui.data.api.Response.Success)?.data }.lastOrNull()?.tracks
+    }
+
+    /** The source's songs as imported rows: an imported source keeps its own rows whole. */
+    suspend fun sourceRows(uri: String): List<com.music.spotui.data.local.ImportedSong>? =
+        if (uri.startsWith("scadify:imported:")) {
+            com.music.spotui.data.local.ImportedPlaylists.get(uri.removePrefix("scadify:imported:"))?.items
+        } else sourceSongs(uri)?.map { com.music.spotui.data.local.ImportedPlaylists.rowOf(it) }
+
+    /** A phone-side target (imported or local): the add is the store's, the counts said plainly. */
+    fun pickPhone(target: EditablePlaylist) {
+        reading = true
+        scope.launch {
+            val result = runCatching {
+                if (target.source == com.music.spotui.data.api.PlaylistSource.IMPORTED) {
+                    sourceRows(sourceUri)?.let { com.music.spotui.data.local.ImportedPlaylists.addAll(target.id, it) }
+                } else {
+                    sourceSongs(sourceUri)?.let { com.music.spotui.data.local.LocalPlaylists.addAllSongs(target.id, it) }
+                }
+            }.getOrNull()
+            reading = false
+            onDismiss()
+            when {
+                result == null -> say(context.getString(R.string.playlist_change_refused))
+                result.added == 0 && result.skipped == 0 -> say(context.getString(R.string.add_collection_nothing))
+                result.added == 0 -> say(context.getString(R.string.duplicate_text_all, target.name))
+                else -> say(context.getString(R.string.add_collection_done, result.added, target.name))
+            }
+        }
+    }
+
     fun pick(target: EditablePlaylist) {
         if (reading) return
+        if (target.source != com.music.spotui.data.api.PlaylistSource.ACCOUNT) { pickPhone(target); return }
         reading = true
         scope.launch {
             val plan = runCatching { PlaylistMerge.plan(MyspotiRuntime.api, "spotify:playlist:${target.id}", sourceUri) }.getOrNull()
@@ -145,7 +190,7 @@ fun AddCollectionToPlaylistSheet(sourceUri: String, title: String, onDismiss: ()
                     color = AppMuted, fontSize = 14.sp, modifier = Modifier.padding(20.dp, 12.dp),
                 )
                 shown.isEmpty() && !matchesFind(query, likedName) -> Text(
-                    stringResource(if (list.isEmpty()) R.string.add_to_playlist_empty else R.string.add_to_playlist_no_match, query.trim()),
+                    stringResource(if (list.isEmpty() && phoneLists.isEmpty()) R.string.add_to_playlist_empty else R.string.add_to_playlist_no_match, query.trim()),
                     color = AppMuted, fontSize = 14.sp, modifier = Modifier.padding(20.dp, 12.dp),
                 )
                 else -> LazyColumn(modifier = Modifier.heightIn(max = 420.dp).padding(top = 4.dp)) {

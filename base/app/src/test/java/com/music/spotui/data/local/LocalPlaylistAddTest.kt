@@ -24,6 +24,31 @@ class LocalPlaylistAddTest {
         album = "Album", durationMs = 1_000L, artUri = Uri.EMPTY,
     )
 
+    @Test fun aCatalogSongGoesIntoALocalPlaylistByItsStreamAddress() {
+        // The pickers' path for a catalog song (v23, package D): the row is the
+        // song's stream address, which the local player resolves through the
+        // extensions like any queued catalog song.
+        val p = LocalPlaylists.create("Streamed")
+        val song = com.music.spotui.data.entity.SongsModel(
+            id = 1, title = "Song", album = "Album", singer = "Artist", coverUri = "",
+            url = "spotify:track:ABC", spotifyTrackId = "ABC", durationMs = 200_000,
+        )
+        assertTrue(LocalPlaylists.addSong(p.id, song))
+        val items = LocalPlaylists.playlists.getValue(p.id).items
+        assertEquals(1, items.size)
+        // The stream address for the song (its metadata rides as query parameters).
+        assertTrue(items[0].uri.startsWith("myspoti-ext://track/ABC"))
+        assertEquals("Song", items[0].title)
+        // Once only, like a file.
+        assertFalse(LocalPlaylists.addSong(p.id, song))
+        // A song with no Spotify id has nothing to stream by: refused, said so.
+        assertFalse(LocalPlaylists.addSong(p.id, com.music.spotui.data.entity.SongsModel(
+            id = 2, title = "Loose", album = "", singer = "Artist", coverUri = "", url = "",
+        )))
+        assertEquals(1, LocalPlaylists.playlists.getValue(p.id).items.size)
+        LocalPlaylists.delete(p.id)
+    }
+
     @Test fun aFileGoesIntoAPlaylistOnce() {
         val p = LocalPlaylists.create("Once")
         val one = track(1, "content://media/1")

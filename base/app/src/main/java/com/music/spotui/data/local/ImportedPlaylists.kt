@@ -144,6 +144,63 @@ object ImportedPlaylists {
     fun remove(id: String, key: String) =
         update { playlists[id]?.let { playlists[id] = it.copy(items = it.items.filterNot { s -> s.key == key }) } }
 
+    /** A picked song as an imported row: the model's own facts (its Spotify id, ISRC,
+     * cover, album, duration and stated explicitness), no row key yet — [add] assigns one. */
+    fun rowOf(song: com.music.spotui.data.entity.SongsModel): ImportedSong = ImportedSong(
+        key = "", spotifyTrackId = song.spotifyTrackId, title = song.title, artist = song.singer,
+        album = song.album, durationMs = song.durationMs.toLong(), coverUrl = song.coverUri,
+        isrc = song.isrc, explicit = song.explicitStatus,
+    )
+
+    /** A phone file as an imported row: no catalog identity, so the row plays by its
+     * title and artist, like an Amazon import's rows. */
+    fun rowOf(track: LocalTrack): ImportedSong = ImportedSong(
+        key = "", spotifyTrackId = "", title = track.title, artist = track.artist,
+        album = track.album, durationMs = track.durationMs, coverUrl = track.artUri.toString(),
+    )
+
+    /**
+     * Adds [song] to the playlist, appended last with a fresh row key (the "Add to
+     * playlist" pickers' path — the store had no add at all before v23, so a user
+     * whose playlists are all imported could add a song to none of them). The
+     * store's no-duplicates rule decides by identity (Spotify id, else ASIN — see
+     * [create]): a song already in under the same identity is not added again, and
+     * false says so, so the caller can say "Already in …" instead of a silent
+     * success. A song with no identity cannot be told apart from another, so it is
+     * always added. False also when there is no such playlist.
+     */
+    fun add(id: String, song: ImportedSong): Boolean {
+        var added = false
+        update {
+            playlists[id]?.let { p ->
+                if (song.identity.isBlank() || p.items.none { it.identity == song.identity }) {
+                    playlists[id] = p.copy(items = p.items + song.copy(key = UUID.randomUUID().toString()))
+                    added = true
+                }
+            }
+        }
+        return added
+    }
+
+    /** Adds every song of [songs] the playlist does not hold yet (see [add]). */
+    fun addAll(id: String, songs: List<ImportedSong>): AddResult {
+        var result = AddResult(0, 0)
+        update {
+            playlists[id]?.let { p ->
+                val have = p.items.mapTo(HashSet()) { it.identity }
+                val fresh = ArrayList<ImportedSong>()
+                var skipped = 0
+                for (s in songs) {
+                    if (s.identity.isBlank() || have.add(s.identity)) fresh += s.copy(key = UUID.randomUUID().toString())
+                    else skipped++
+                }
+                if (fresh.isNotEmpty()) playlists[id] = p.copy(items = p.items + fresh)
+                result = AddResult(fresh.size, skipped)
+            }
+        }
+        return result
+    }
+
     /**
      * Repairs a stored playlist's songs from a fresh reading of its source, [freshByTrackId]
      * (Spotify track id → the fresh reading's song of it): the ISRC, the cover and the album

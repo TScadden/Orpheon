@@ -72,25 +72,45 @@ fun AddToPlaylistSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // The last list at once, read again behind it.
     var playlists by remember { mutableStateOf(EditablePlaylists.cachedWithCovers()) }
+    // This phone's own playlists (imported, then local): offered alongside the
+    // account's — with no account they are all the playlists there are.
+    var phoneLists by remember { mutableStateOf(EditablePlaylists.phonePlaylists()) }
     var query by remember { mutableStateOf("") }
     LaunchedEffect(Unit) {
         // Folders flattened: adding to a playlist does not need the folder tree.
         playlists = EditablePlaylists.loadWithCovers()
+        phoneLists = EditablePlaylists.phonePlaylists()
     }
     // Filtered in one pass; accent-insensitive like the other "find" fields of the app.
-    val shown = remember(playlists, query) {
-        playlists.orEmpty().filter { it.id != excludePlaylistId && matchesFind(query, it.name) }
+    val shown = remember(playlists, phoneLists, query) {
+        (playlists.orEmpty() + phoneLists).filter { it.id != excludePlaylistId && matchesFind(query, it.name) }
+    }
+
+    fun say(text: String) = Handler(Looper.getMainLooper()).post {
+        Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
     }
 
     fun addTo(playlist: EditablePlaylist) {
         onDismiss()
-        SpotifySync.addTrackToPlaylist(context, playlist.id, song.spotifyTrackId) { ok ->
-            // The write runs on the main dispatcher already; posted anyway so the toast
-            // survives the sheet's teardown.
-            Handler(Looper.getMainLooper()).post {
-                val text = if (ok) context.getString(R.string.local_added_to, playlist.name)
-                else context.getString(R.string.playlist_change_refused)
-                Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+        when (playlist.source) {
+            com.music.spotui.data.api.PlaylistSource.IMPORTED -> {
+                // The phone's own store: the outcome is known at once, and said honestly.
+                val added = com.music.spotui.data.local.ImportedPlaylists.add(
+                    playlist.id, com.music.spotui.data.local.ImportedPlaylists.rowOf(song))
+                say(context.getString(if (added) R.string.local_added_to else R.string.local_already_in_playlist, playlist.name))
+            }
+            com.music.spotui.data.api.PlaylistSource.LOCAL -> {
+                val added = com.music.spotui.data.local.LocalPlaylists.addSong(playlist.id, song)
+                say(context.getString(
+                    if (added) R.string.local_added_to
+                    else if (song.spotifyTrackId.isBlank()) R.string.playlist_change_refused
+                    else R.string.local_already_in_playlist, playlist.name))
+            }
+            com.music.spotui.data.api.PlaylistSource.ACCOUNT -> SpotifySync.addTrackToPlaylist(context, playlist.id, song.spotifyTrackId) { ok ->
+                // The write runs on the main dispatcher already; posted anyway so the toast
+                // survives the sheet's teardown.
+                say(if (ok) context.getString(R.string.local_added_to, playlist.name)
+                    else context.getString(R.string.playlist_change_refused))
             }
         }
     }
@@ -118,22 +138,23 @@ fun AddToPlaylistSheet(
             )
             val list = playlists
             when {
-                list == null -> Text(
-                    stringResource(R.string.loading_playlists),
-                    color = androidx.compose.ui.graphics.Color.Gray, fontSize = 14.sp,
-                    modifier = Modifier.padding(20.dp, 12.dp),
-                )
-                shown.isEmpty() -> Text(
-                    stringResource(if (list.isEmpty()) R.string.add_to_playlist_empty else R.string.add_to_playlist_no_match, query.trim()),
-                    color = androidx.compose.ui.graphics.Color.Gray, fontSize = 14.sp,
-                    modifier = Modifier.padding(20.dp, 12.dp),
-                )
-                else -> LazyColumn(modifier = Modifier.heightIn(max = 420.dp).padding(top = 4.dp)) {
+                // Rows first: the phone's own playlists are there at once, account or not.
+                shown.isNotEmpty() -> LazyColumn(modifier = Modifier.heightIn(max = 420.dp).padding(top = 4.dp)) {
                     items(shown.size) { i ->
                         val pl = shown[i]
                         PickRow(pl) { addTo(pl) }
                     }
                 }
+                list == null -> Text(
+                    stringResource(R.string.loading_playlists),
+                    color = androidx.compose.ui.graphics.Color.Gray, fontSize = 14.sp,
+                    modifier = Modifier.padding(20.dp, 12.dp),
+                )
+                else -> Text(
+                    stringResource(if (list.isEmpty() && phoneLists.isEmpty()) R.string.add_to_playlist_empty else R.string.add_to_playlist_no_match, query.trim()),
+                    color = androidx.compose.ui.graphics.Color.Gray, fontSize = 14.sp,
+                    modifier = Modifier.padding(20.dp, 12.dp),
+                )
             }
             Spacer(Modifier.height(16.dp))
         }

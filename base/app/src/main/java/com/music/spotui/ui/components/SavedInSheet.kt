@@ -214,7 +214,10 @@ fun SavedInSheet(
             when (val list = playlists) {
                 null -> Text(stringResource(R.string.loading_playlists), color = Color.Gray, fontSize = 14.sp, modifier = Modifier.padding(20.dp, 12.dp))
                 // Said, rather than Liked Songs alone looking like all there is (reported in the Immersive look).
-                emptyList<com.music.spotui.data.api.EditablePlaylist>() -> if (folder == null) Text(stringResource(R.string.add_to_playlist_empty),
+                // The phone's own playlists below count too: the text only shows when there are none of those either.
+                emptyList<com.music.spotui.data.api.EditablePlaylist>() -> if (folder == null &&
+                    com.music.spotui.data.local.ImportedPlaylists.list().isEmpty() &&
+                    com.music.spotui.data.local.LocalPlaylists.list().isEmpty()) Text(stringResource(R.string.add_to_playlist_empty),
                     color = Color.Gray, fontSize = 14.sp, modifier = Modifier.padding(20.dp, 12.dp))
                 else -> LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
                     items(list.size) { i ->
@@ -268,6 +271,81 @@ fun SavedInSheet(
                             }
                             if (saved) SpotifySync.removeTrackFromPlaylist(context, pl.id, song.spotifyTrackId, done)
                             else SpotifySync.addTrackToPlaylist(context, pl.id, song.spotifyTrackId, done)
+                        }
+                    }
+                }
+            }
+            // ── This phone's own playlists: the imported ones, then the local ones ──
+            // Offered at the root alongside the account's, each row toggling the song
+            // in or out of the store that holds it. With no account signed in they are
+            // all the playlists there are (reported Nov 26 2026: this sheet offered a
+            // user whose playlists are all imported nothing but Liked Songs).
+            if (folder == null) {
+                val imported = com.music.spotui.data.local.ImportedPlaylists.list()
+                val local = com.music.spotui.data.local.LocalPlaylists.list()
+                if (imported.isNotEmpty() || local.isNotEmpty()) {
+                    LazyColumn(modifier = Modifier.heightIn(max = 220.dp)) {
+                        items(imported.size) { i ->
+                            val p = imported[i]
+                            val row = p.items.firstOrNull { song.spotifyTrackId.isNotBlank() && it.identity == song.spotifyTrackId }
+                            SavedInRow(
+                                name = p.name,
+                                subtitle = pluralStringResource(R.plurals.lbl_n_songs, p.items.size, p.items.size),
+                                saved = row != null,
+                                cover = {
+                                    GlideImage(
+                                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
+                                        model = p.cover.takeIf { it.isNotBlank() } ?: p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl,
+                                        contentScale = ContentScale.Crop,
+                                        failure = placeholder(R.drawable.placeholder),
+                                        loading = placeholder(R.drawable.placeholder),
+                                        contentDescription = "",
+                                    )
+                                },
+                            ) {
+                                val text = if (row != null) {
+                                    com.music.spotui.data.local.ImportedPlaylists.remove(p.id, row.key)
+                                    context.getString(R.string.removed_from, p.name)
+                                } else {
+                                    com.music.spotui.data.local.ImportedPlaylists.add(p.id, com.music.spotui.data.local.ImportedPlaylists.rowOf(song))
+                                    context.getString(R.string.local_added_to, p.name)
+                                }
+                                android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        items(local.size) { i ->
+                            val p = local[i]
+                            // The row an add made: the song's own address (its downloaded file, else its stream).
+                            val ownUri = if (song.spotifyTrackId.isNotBlank()) {
+                                com.music.spotui.extensions.ExtensionAudio.localTrack(song).uri.toString()
+                            } else ""
+                            val item = p.items.firstOrNull { ownUri.isNotBlank() && it.uri == ownUri }
+                            SavedInRow(
+                                name = p.name,
+                                subtitle = pluralStringResource(R.plurals.lbl_n_songs, p.items.size, p.items.size),
+                                saved = item != null,
+                                cover = {
+                                    GlideImage(
+                                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
+                                        model = p.cover.takeIf { it.isNotBlank() } ?: p.items.firstOrNull { it.artUri.isNotBlank() }?.artUri,
+                                        contentScale = ContentScale.Crop,
+                                        failure = placeholder(R.drawable.placeholder),
+                                        loading = placeholder(R.drawable.placeholder),
+                                        contentDescription = "",
+                                    )
+                                },
+                            ) {
+                                val text = when {
+                                    item != null -> {
+                                        com.music.spotui.data.local.LocalPlaylists.remove(p.id, item.key)
+                                        context.getString(R.string.removed_from, p.name)
+                                    }
+                                    com.music.spotui.data.local.LocalPlaylists.addSong(p.id, song) ->
+                                        context.getString(R.string.local_added_to, p.name)
+                                    else -> context.getString(R.string.playlist_change_refused)
+                                }
+                                android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
                 }

@@ -150,6 +150,25 @@ object LocalPlaylists {
         return result
     }
 
+    /**
+     * Adds a catalog [song] to a local playlist (the "Add to playlist" pickers):
+     * the row is the song's own stream address, which the local player resolves
+     * through the extensions like any queued catalog song — or its downloaded
+     * file, when it has one. False when the song is already there, and for a song
+     * with no Spotify id (nothing to stream it by).
+     */
+    fun addSong(id: String, song: com.music.spotui.data.entity.SongsModel): Boolean {
+        if (song.spotifyTrackId.isBlank()) return false
+        return add(id, com.music.spotui.extensions.ExtensionAudio.localTrack(song))
+    }
+
+    /** [addSong] for several songs at once; a song with no Spotify id counts as skipped. */
+    fun addAllSongs(id: String, songs: List<com.music.spotui.data.entity.SongsModel>): AddResult {
+        val withIds = songs.filter { it.spotifyTrackId.isNotBlank() }
+        val r = addAll(id, withIds.map { com.music.spotui.extensions.ExtensionAudio.localTrack(it) })
+        return AddResult(r.added, r.skipped + (songs.size - withIds.size))
+    }
+
     fun remove(id: String, key: String) =
         update { playlists[id]?.let { playlists[id] = it.copy(items = it.items.filterNot { i -> i.key == key }) } }
 

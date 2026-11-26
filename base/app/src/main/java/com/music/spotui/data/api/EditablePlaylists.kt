@@ -7,6 +7,9 @@ import app.myspoti.host.android.MyspotiRuntime
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** Where a picker row's playlist lives: the account's, or one of this phone's own stores. */
+enum class PlaylistSource { ACCOUNT, IMPORTED, LOCAL }
+
 /**
  * A playlist the user can add tracks to, for the "Add to playlist" pickers. With a
  * [folderUri] the row is a library folder instead, opened in place.
@@ -17,6 +20,8 @@ data class EditablePlaylist(
     val trackCount: Int,
     val imageUrl: String?,
     val folderUri: String? = null,
+    /** The account's by default; the phone's own rows say which store holds them. */
+    val source: PlaylistSource = PlaylistSource.ACCOUNT,
 ) {
     val isFolder: Boolean get() = folderUri != null
 }
@@ -62,7 +67,8 @@ object EditablePlaylists {
     internal fun encodeList(list: List<EditablePlaylist>): String = JSONArray().apply {
         list.forEach { p ->
             put(JSONObject().put("id", p.id).put("name", p.name).put("count", p.trackCount)
-                .put("image", p.imageUrl ?: JSONObject.NULL).put("folder", p.folderUri ?: JSONObject.NULL))
+                .put("image", p.imageUrl ?: JSONObject.NULL).put("folder", p.folderUri ?: JSONObject.NULL)
+                .put("src", p.source.name))
         }
     }.toString()
 
@@ -72,9 +78,36 @@ object EditablePlaylists {
         (0 until a.length()).map { i ->
             val o = a.getJSONObject(i)
             EditablePlaylist(o.getString("id"), o.getString("name"), o.getInt("count"),
-                o.optString("image").takeUnless { o.isNull("image") }, o.optString("folder").takeUnless { o.isNull("folder") })
+                o.optString("image").takeUnless { o.isNull("image") }, o.optString("folder").takeUnless { o.isNull("folder") },
+                // Absent in a list kept before the phone's own rows were told apart: the account's.
+                runCatching { PlaylistSource.valueOf(o.optString("src")) }.getOrDefault(PlaylistSource.ACCOUNT))
         }
     }.getOrNull()
+
+    /**
+     * This phone's own playlists as picker rows — the imported ones, then the local
+     * ones. The pickers offer them alongside the account's: with no account signed
+     * in they are all the playlists there are (reported Nov 26 2026: the picker
+     * offered Liked Songs alone to a user whose playlists are all imported, and no
+     * picker offered an imported playlist at all). Read straight from the stores,
+     * so they are there at once; the pickers read them again behind the account list.
+     */
+    fun phonePlaylists(): List<EditablePlaylist> =
+        com.music.spotui.data.local.ImportedPlaylists.list().map { p ->
+            EditablePlaylist(
+                id = p.id, name = p.name, trackCount = p.items.size,
+                imageUrl = p.cover.takeIf { it.isNotBlank() }
+                    ?: p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl,
+                source = PlaylistSource.IMPORTED,
+            )
+        } + com.music.spotui.data.local.LocalPlaylists.list().map { p ->
+            EditablePlaylist(
+                id = p.id, name = p.name, trackCount = p.items.size,
+                imageUrl = p.cover.takeIf { it.isNotBlank() }
+                    ?: p.items.firstOrNull { it.artUri.isNotBlank() }?.artUri,
+                source = PlaylistSource.LOCAL,
+            )
+        }
 
     /** Sign-out: nothing of the account's playlists is kept. */
     fun clear() {
