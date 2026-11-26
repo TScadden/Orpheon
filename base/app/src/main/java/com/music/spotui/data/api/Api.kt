@@ -1048,7 +1048,13 @@ class Api constructor(
         importRepairScope.launch {
             runCatching {
                 val fresh = PlaylistImport.fetchSpotify(link.id)
-                val byId = fresh.songs.filter { it.spotifyTrackId.isNotBlank() }.associateBy { it.spotifyTrackId }
+                // Spotify's API read is refused intermittently (a 429 quota answer was
+                // seen from a phone whose repair then had nothing to fill: the merged
+                // read came back embed-only). Whatever the fresh reading still lacks is
+                // completed from the app's own catalog first (CatalogCompletion), so the
+                // repair below consumes the fullest reading either source could give.
+                val completed = CatalogCompletion.completeFromCatalog(fresh.songs)
+                val byId = completed.filter { it.spotifyTrackId.isNotBlank() }.associateBy { it.spotifyTrackId }
                 if (byId.isNotEmpty()) {
                     val repaired = ImportedPlaylists.repair(p.id, byId)
                     repaired.forEach { com.music.spotui.data.offline.OfflineDownloader.forgetFailed(it) }

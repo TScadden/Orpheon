@@ -172,7 +172,13 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
             is PlaylistLink.Spotify -> {
                 busy = true; error = null
                 scope.launch {
-                    runCatching { PlaylistImport.fetchSpotify(parsed.id) }
+                    runCatching {
+                        val read = PlaylistImport.fetchSpotify(parsed.id)
+                        // A reading Spotify's API refused part of arrives thin (no
+                        // covers, albums or ISRCs): complete it from the app's own
+                        // catalog before it is shown or kept (CatalogCompletion).
+                        read.copy(songs = com.music.spotui.data.api.CatalogCompletion.completeFromCatalog(read.songs))
+                    }
                         .onSuccess { fetched = it; name = it.name.ifBlank { context.getString(R.string.import_default_name) } }
                         .onFailure { error = context.getString(R.string.import_failed) }
                     busy = false

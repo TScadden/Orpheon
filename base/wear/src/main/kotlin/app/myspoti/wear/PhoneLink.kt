@@ -119,8 +119,69 @@ class PhoneLink(private val context: Context) {
             val o = e.jsonObject
             WatchTrack(o.text("uri"), o.text("name"), o["artists"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty(), o.text("album"),
                 o["durationMs"]?.jsonPrimitive?.long ?: 0L, o.text("cover").ifBlank { null },
-                o.text("isrc"), o["phoneOnly"]?.jsonPrimitive?.content == "true")
+                o.text("isrc"), o["phoneOnly"]?.jsonPrimitive?.content == "true",
+                o.text("localUri"), o["size"]?.jsonPrimitive?.long ?: 0L, o["modified"]?.jsonPrimitive?.long ?: 0L)
         }
+    }
+
+    /**
+     * One of the phone's files, pulled for the watch's own player (Scadify v21): a Data
+     * Layer channel to the phone's app — the watch writes the file's address (the
+     * `localUri` its track answer carried) as one line, the phone answers "ok <bytes>"
+     * and the file itself, or "error gone" when the file is not one it exposes or no
+     * longer opens. [registerCloser] is handed the channel's close as soon as the
+     * channel is open, so a caller standing guard over the pull can force it shut.
+     * Throws [PullFailed]: UNREACHABLE when no channel to the phone could be had at
+     * all, GONE when the phone answered that the file is not there.
+     */
+    suspend fun pullFile(localUri: String, registerCloser: ((() -> Unit)?) -> Unit = {}): FilePull {
+        val nodes = try {
+            Wearable.getNodeClient(context).connectedNodes.await()
+        } catch (e: Exception) {
+            throw PullFailed(PullFailed.Kind.UNREACHABLE, e)
+        }
+        val node = nodes.firstOrNull { it.isNearby } ?: nodes.firstOrNull()
+            ?: throw PullFailed(PullFailed.Kind.UNREACHABLE)
+        val client = Wearable.getChannelClient(context)
+        val channel = try {
+            client.openChannel(node.id, FILE).await()
+        } catch (e: Exception) {
+            throw PullFailed(PullFailed.Kind.UNREACHABLE, e)
+        }
+        val closer: () -> Unit = { runCatching { client.close(channel) } }
+        registerCloser(closer)
+        return withContext(Dispatchers.IO) {
+            try {
+                client.getOutputStream(channel).await().also { out ->
+                    out.write((localUri + "\n").toByteArray(Charsets.UTF_8))
+                    out.flush()
+                }
+                val input = client.getInputStream(channel).await()
+                val status = readStatusLine(input)
+                if (status.startsWith("ok")) {
+                    FilePull(input, status.removePrefix("ok").trim().toLongOrNull() ?: -1L, closer)
+                } else {
+                    closer()
+                    throw PullFailed(PullFailed.Kind.GONE)
+                }
+            } catch (e: PullFailed) {
+                throw e
+            } catch (e: Exception) {
+                closer()
+                throw PullFailed(PullFailed.Kind.UNREACHABLE, e)
+            }
+        }
+    }
+
+    /** The phone's one-line answer on a file channel, read byte by byte (the file follows it). */
+    private fun readStatusLine(input: java.io.InputStream): String {
+        val bytes = java.io.ByteArrayOutputStream()
+        while (bytes.size() < 256) {
+            val b = input.read()
+            if (b < 0 || b == '\n'.code) break
+            bytes.write(b)
+        }
+        return bytes.toString(Charsets.UTF_8.name()).trim()
     }
 
     /** What plays on the phone, asked fresh; the answer is kept as Phone mode's state. */
@@ -153,6 +214,7 @@ class PhoneLink(private val context: Context) {
         const val EXTENSIONS = "/orpheon/extensions"
         const val NOW_PLAYING = "/scadify/nowplaying"
         const val CONTROL = "/scadify/control"
+        const val FILE = "/scadify/file"
         private const val TAG = "Orpheon"
         private const val LINK = "link"
         private const val ASK_MS = 20_000L
@@ -165,9 +227,40 @@ class PhoneLink(private val context: Context) {
 /**
  * A song of a list, as the phone gives it for the watch's extensions. [isrc]: the recording's
  * fingerprint where the phone's store has it. [phoneOnly]: a file of the phone with no
- * catalogue identity — the watch cannot play it and must not try (Phone mode plays it there).
+ * catalogue identity, so the extensions cannot fetch it. A phone-only song that carries a
+ * [localUri] — the file's address on the phone, with its [fileSize] and [fileModified]
+ * (epoch seconds) where the phone could state them — is one the watch pulls and plays
+ * itself (Scadify v21, [WatchPulls]); a phone-only song without one is an imported song
+ * with no identity kept, which the watch cannot play at all.
  */
 class WatchTrack(
     val uri: String, val name: String, val artists: List<String>, val album: String,
     val durationMs: Long, val cover: String?, val isrc: String = "", val phoneOnly: Boolean = false,
-)
+    val localUri: String = "", val fileSize: Long = 0L, val fileModified: Long = 0L,
+) {
+    /** A phone file the watch can pull and play in Watch mode. */
+    val pullable: Boolean get() = phoneOnly && localUri.isNotBlank()
+}
+
+/**
+ * A phone file on its way to the watch (Scadify v21): the file's bytes and their count
+ * (-1 where the phone did not say). Closing releases the channel.
+ */
+class FilePull(
+    val input: java.io.InputStream,
+    val size: Long,
+    private val closer: () -> Unit,
+) : java.io.Closeable {
+    @Volatile private var closed = false
+    override fun close() {
+        if (closed) return
+        closed = true
+        runCatching { input.close() }
+        closer()
+    }
+}
+
+/** A pull that could not be had: the phone could not be reached, or the file is not there. */
+class PullFailed(val kind: Kind, cause: Throwable? = null) : Exception(kind.name, cause) {
+    enum class Kind { UNREACHABLE, GONE }
+}

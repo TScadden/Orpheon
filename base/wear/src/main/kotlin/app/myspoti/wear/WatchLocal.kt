@@ -24,13 +24,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 /**
- * A list played on the watch from its own extensions ([WatchExtensions]): each song's audio is
- * asked as it comes (the next one while the current one plays) and played by a plain player,
- * straight from the network. A song no extension has is passed; after a few in a row the list stops.
+ * A list played on the watch itself: each song's audio is resolved as it comes (the next
+ * one while the current one plays) — asked of the watch's own extensions
+ * ([WatchExtensions]) and streamed from the network, or, for a file of the phone, pulled
+ * from the phone and played as it crosses ([WatchPulls], Scadify v21). A song neither
+ * source has is passed; after a few in a row the list stops.
  */
 object WatchLocal {
     private const val TAG = "Orpheon"
     private const val MAX_MISSES = 5
+    private const val PULL_URI = "scadify-pull://song"
 
     class Now(val name: String, val artists: String, val playing: Boolean, val source: String, val cover: String? = null)
 
@@ -39,7 +42,10 @@ object WatchLocal {
     private var tracks: List<WatchTrack> = emptyList()
     private var index = 0
     private var source = ""
-    private var ahead: Deferred<Pair<AudioStream, String>?>? = null
+    private var current: WatchSource? = null
+    private var sessionFailed: ((String) -> Unit)? = null
+    private var pullWatch: kotlinx.coroutines.Job? = null
+    private var ahead: Deferred<WatchSource?>? = null
     private var aheadIndex = -1
     private lateinit var app: Context
 
@@ -48,11 +54,27 @@ object WatchLocal {
     val now: StateFlow<Now?> = _now
     val active: Boolean get() = _now.value != null
 
-    /** Plays [list] (the list [uri]) from [start], whose audio [first] was already found, from [positionMs]. */
-    fun play(context: Context, list: List<WatchTrack>, start: Int, first: Pair<AudioStream, String>, uri: String = "", positionMs: Long = 0L) {
+    /**
+     * Plays [list] (the list [uri]) from [start], whose audio [first] was already
+     * resolved, from [positionMs]. [failed] hears of a pull that cannot be had (the
+     * phone unreachable, the file gone) in plain words for the screen.
+     */
+    fun play(context: Context, list: List<WatchTrack>, start: Int, first: WatchSource, uri: String = "", positionMs: Long = 0L, failed: (String) -> Unit = {}) {
         app = context.applicationContext
         tracks = list; index = start
+        sessionFailed = failed
         load(first, positionMs)
+    }
+
+    /**
+     * A song's audio: a phone file is pulled from the phone, any other song is asked
+     * of the extensions; null for a song the watch cannot play (an imported song with
+     * no identity kept). [ahead]: the song is being readied while another plays.
+     */
+    private suspend fun resolve(t: WatchTrack, ahead: Boolean = false): WatchSource? = when {
+        t.pullable -> WatchSource.Pulled(WatchPulls.open(app, t))
+        t.phoneOnly -> null
+        else -> WatchExtensions.audio(t, ahead)?.let { WatchSource.Stream(it) }
     }
 
     private fun ensurePlayer(): ExoPlayer = player ?: ExoPlayer.Builder(app)
@@ -71,7 +93,18 @@ object WatchLocal {
         p.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) { if (state == Player.STATE_ENDED) move(1) }
             override fun onIsPlayingChanged(isPlaying: Boolean) { publish() }
-            override fun onPlayerError(error: androidx.media3.common.PlaybackException) { Log.w(TAG, "watch player: ${error.message}"); move(1) }
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                Log.w(TAG, "watch player: ${error.message}")
+                // A pull that failed takes its plain message to the screen: the file
+                // gone — the list moves on; the phone unreachable — further pulls are
+                // pointless, so the list stops here.
+                val failure = (current as? WatchSource.Pulled)?.buffer?.failure as? PullFailed
+                when (failure?.kind) {
+                    PullFailed.Kind.GONE -> { sessionFailed?.invoke(app.getString(R.string.wear_pull_gone)); move(1) }
+                    PullFailed.Kind.UNREACHABLE -> { sessionFailed?.invoke(app.getString(R.string.wear_pull_no_phone)); scope.launch { stop() } }
+                    null -> move(1)
+                }
+            }
         })
         player = p
     }
@@ -127,17 +160,41 @@ object WatchLocal {
         s.isActive = true
     }
 
-    private fun load(found: Pair<AudioStream, String>, positionMs: Long = 0L) {
-        val (stream, name) = found
-        source = stream.qualityLabel()?.let { "$name · $it" } ?: name
+    private fun load(resolved: WatchSource, positionMs: Long = 0L) {
+        current = resolved
+        pullWatch?.cancel()
         val p = ensurePlayer()
-        p.setMediaSource(sourceOf(stream), positionMs)
+        when (resolved) {
+            is WatchSource.Stream -> {
+                val (stream, name) = resolved.found
+                source = stream.qualityLabel()?.let { "$name · $it" } ?: name
+                p.setMediaSource(sourceOf(stream), positionMs)
+            }
+            is WatchSource.Pulled -> {
+                // A phone file, played as it crosses (or from the watch, when a pull
+                // already landed it there): the player reads the pull's buffer, which
+                // is the cache entry once the pull completes.
+                val buffer = resolved.buffer
+                source = app.getString(if (buffer.done) R.string.wear_on_phone else R.string.wear_pulling)
+                val media = ProgressiveMediaSource.Factory(PullDataSource.Factory(buffer))
+                    .createMediaSource(MediaItem.Builder().setUri(Uri.parse(PULL_URI)).build())
+                p.setMediaSource(media, positionMs)
+                // When the pull lands, the label stops saying it is still crossing.
+                pullWatch = scope.launch {
+                    if (buffer.end.await() == null && current === resolved) {
+                        source = app.getString(R.string.wear_on_phone)
+                        publish()
+                    }
+                }
+            }
+        }
         p.prepare(); p.play()
         publish(playing = true)
         WatchPlaybackService.follow(app, true)
-        // The next song's audio, asked while this one plays.
+        // The next song's audio, resolved while this one plays (a phone file's pull
+        // starts here too, so it is ready — or well on its way — when its turn comes).
         aheadIndex = index + 1
-        ahead = tracks.getOrNull(aheadIndex)?.let { t -> scope.async(Dispatchers.IO) { WatchExtensions.audio(t, ahead = true) } }
+        ahead = tracks.getOrNull(aheadIndex)?.let { t -> scope.async(Dispatchers.IO) { resolve(t, ahead = true) } }
     }
 
     private fun sourceOf(s: AudioStream): MediaSource {
@@ -150,15 +207,13 @@ object WatchLocal {
         } else ProgressiveMediaSource.Factory(data).createMediaSource(MediaItem.fromUri(s.url))
     }
 
-    /** To the song [by] places away whose audio an extension has (passing those none has). */
+    /** To the song [by] places away whose audio a source has (passing those none has). */
     private fun move(by: Int) {
         scope.launch {
             var misses = 0
             var i = index + by
             while (i in tracks.indices && misses < MAX_MISSES) {
-                // A phone file is not asked of the extensions: it is a miss by definition (Phone mode plays it).
-                val found = if (tracks[i].phoneOnly) null
-                    else if (i == aheadIndex) ahead?.await() else WatchExtensions.audio(tracks[i])
+                val found = if (i == aheadIndex) ahead?.await() else resolve(tracks[i])
                 if (found != null) { index = i; load(found); return@launch }
                 misses++; i += if (by < 0) -1 else 1
             }
@@ -182,6 +237,8 @@ object WatchLocal {
     fun stop() {
         player?.release(); player = null
         ahead?.cancel(); ahead = null
+        pullWatch?.cancel(); pullWatch = null
+        current = null
         session?.isActive = false
         if (_now.value != null) {
             _now.value = null
@@ -203,6 +260,15 @@ object WatchLocal {
 
 /** Where the watch's song is: position, length, and whether it waits for data. */
 data class WatchPosition(val positionMs: Long, val durationMs: Long, val buffering: Boolean)
+
+/**
+ * What a song's audio was resolved to (Scadify v21): an extension's stream, played
+ * from the network, or a phone file's pull, played as it crosses and kept on the watch.
+ */
+sealed interface WatchSource {
+    class Stream(val found: Pair<AudioStream, String>) : WatchSource
+    class Pulled(val buffer: PullBuffer) : WatchSource
+}
 
 /**
  * The watch player's buffering (Scadify v18). The player streams each song straight from

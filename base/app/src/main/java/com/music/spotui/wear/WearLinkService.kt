@@ -53,6 +53,8 @@ object WatchAnswers {
     const val EXTENSIONS = "/orpheon/extensions"
     const val NOW_PLAYING = "/scadify/nowplaying"
     const val CONTROL = "/scadify/control"
+    /** A phone file the watch pulls for its own player (Scadify v21): a channel, not a message. */
+    const val FILE = "/scadify/file"
     private const val MAX_LISTS = 60
     private const val MAX_TRACKS = 500
     /** A command (a skip, above all) lands on the player at once; its answer a breath later reads true. */
@@ -124,7 +126,59 @@ object WatchAnswers {
             }
             else -> platformTracks(uri).forEach { add(trackJson(it)) }
         }
+        enrichLocalFiles(context, out)
         return JSONArray().apply { out.forEach { put(it) } }.toString()
+    }
+
+    /**
+     * The size and last-modified time of each phone file among the rows, beside its
+     * `localUri` (Scadify v21): the watch keys its on-watch cache on the three together,
+     * so a file changed on this phone is pulled again instead of played stale. Best
+     * effort: a file that cannot be stated keeps the row as it was (the watch then keys
+     * on the address alone).
+     */
+    private fun enrichLocalFiles(context: Context, rows: List<JSONObject>) {
+        val resolver = context.contentResolver
+        for (row in rows) {
+            val uri = row.optString("localUri")
+            if (uri.isBlank()) continue
+            val parsed = runCatching { android.net.Uri.parse(uri) }.getOrNull() ?: continue
+            val size = runCatching { resolver.openAssetFileDescriptor(parsed, "r")?.use { it.length } ?: -1L }.getOrDefault(-1L)
+            if (size >= 0) row.put("size", size)
+            val modified = localModified(resolver, parsed)
+            if (modified > 0) row.put("modified", modified)
+        }
+    }
+
+    /** A file's last-modified time in epoch seconds where the store keeps one, else 0. */
+    private fun localModified(resolver: android.content.ContentResolver, uri: android.net.Uri): Long {
+        if (uri.scheme == "file") {
+            return runCatching { java.io.File(uri.path ?: return 0L).lastModified() / 1000 }.getOrDefault(0L)
+        }
+        return runCatching {
+            resolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.DATE_MODIFIED), null, null, null)?.use { c ->
+                if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else 0L
+            } ?: 0L
+        }.getOrDefault(0L)
+    }
+
+    /**
+     * A phone file opened for the watch's pull, and its length (-1 where the store does
+     * not say). Only the files the track answers expose can be had this way — the local
+     * playlists' songs and the liked files — and nothing else on the phone: an address
+     * that is not one of theirs, or a file that no longer opens, answers null.
+     */
+    fun localFile(context: Context, uri: String): Pair<java.io.InputStream, Long>? {
+        if (uri.isBlank()) return null
+        LocalPlaylists.init(context)
+        val exposed = HashSet<String>()
+        LocalPlaylists.playlists.values.forEach { p -> p.items.forEach { exposed.add(it.uri) } }
+        LocalLikes.items.forEach { exposed.add(it.uri) }
+        if (uri !in exposed) return null
+        val parsed = runCatching { android.net.Uri.parse(uri) }.getOrNull() ?: return null
+        val input = runCatching { context.contentResolver.openInputStream(parsed) }.getOrNull() ?: return null
+        val size = runCatching { context.contentResolver.openAssetFileDescriptor(parsed, "r")?.use { it.length } ?: -1L }.getOrDefault(-1L)
+        return input to size
     }
 
     /** A list's songs from the account's platform, paged as the platform gives them. */
@@ -151,7 +205,7 @@ object WatchAnswers {
         PassPayload.JSON.encodeToString(ListSerializer(PassExtension.serializer()), com.music.spotui.pass.PassAndroid.extensions(context))
 }
 
-/** The Data Layer side of [WatchAnswers]: small answers by message, the extensions (large) through a channel. */
+/** The Data Layer side of [WatchAnswers]: small answers by message, the extensions and the phone's files (large) through channels. */
 class WearLinkService : WearableListenerService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -167,19 +221,62 @@ class WearLinkService : WearableListenerService() {
     }
 
     override fun onChannelOpened(channel: ChannelClient.Channel) {
-        if (channel.path != WatchAnswers.EXTENSIONS) return
+        when (channel.path) {
+            WatchAnswers.EXTENSIONS -> scope.launch {
+                val client = Wearable.getChannelClient(applicationContext)
+                runCatching {
+                    val text = runCatching { WatchAnswers.answer(applicationContext, channel.path, "") }.getOrElse { "error: ${it.message}" }
+                    client.getOutputStream(channel).await().use { it.write(text.encodeToByteArray()) }
+                }.onFailure { Logbook.log("watch: extensions not sent (${it.message})") }
+                runCatching { client.close(channel).await() }
+            }
+            WatchAnswers.FILE -> serveFile(channel)
+        }
+    }
+
+    /**
+     * One file for the watch's own player (Scadify v21): the watch writes the file's
+     * address — the `localUri` its track answers carried — as one line, and the phone
+     * answers with a line of its own ("ok <bytes>", or "error gone" for an address that
+     * is not one of the exposed files or no longer opens) and then the file itself.
+     * Data Layer only: the channel exists solely between this app and its own watch app.
+     */
+    private fun serveFile(channel: ChannelClient.Channel) {
         scope.launch {
             val client = Wearable.getChannelClient(applicationContext)
             runCatching {
-                val text = runCatching { WatchAnswers.answer(applicationContext, channel.path, "") }.getOrElse { "error: ${it.message}" }
-                client.getOutputStream(channel).await().use { it.write(text.encodeToByteArray()) }
-            }.onFailure { Logbook.log("watch: extensions not sent (${it.message})") }
+                val input = client.getInputStream(channel).await()
+                val uri = readLine(input)
+                val opened = WatchAnswers.localFile(applicationContext, uri)
+                client.getOutputStream(channel).await().use { output ->
+                    if (opened == null) {
+                        output.write("error gone\n".encodeToByteArray())
+                    } else {
+                        output.write("ok ${opened.second}\n".encodeToByteArray())
+                        output.flush()
+                        opened.first.use { it.copyTo(output) }
+                    }
+                    output.flush()
+                }
+            }.onFailure { Logbook.log("watch: file not sent (${it.message})") }
             runCatching { client.close(channel).await() }
         }
     }
 
+    /** One line of a channel, byte by byte (the channel stays open for what follows it). */
+    private fun readLine(input: java.io.InputStream): String {
+        val bytes = java.io.ByteArrayOutputStream()
+        while (bytes.size() < MAX_REQUEST_BYTES) {
+            val b = input.read()
+            if (b < 0 || b == '\n'.code) break
+            bytes.write(b)
+        }
+        return bytes.toString(Charsets.UTF_8.name()).trim()
+    }
+
     private companion object {
         const val ANSWER_MS = 25_000L
+        const val MAX_REQUEST_BYTES = 4096
     }
 }
 

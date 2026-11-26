@@ -107,8 +107,11 @@ internal fun WatchPager(
     openTracks: Result<List<WatchTrack>>? = null,
     onCloseList: () -> Unit = {},
     onPlayList: (WatchList) -> Unit = {},
+    onShuffleList: (WatchList) -> Unit = {},
     onPlayTrack: (Int) -> Unit = {},
     onRetryTracks: () -> Unit = {},
+    pullsUsage: String = "",
+    onClearPulls: () -> Unit = {},
     initialPage: Int = 0,
     artwork: Paintable? = rememberWatchArtwork(playing?.cover),
     mode: WatchMode = WatchMode.WATCH,
@@ -131,10 +134,10 @@ internal fun WatchPager(
                     page == 0 -> WatchPlayer(playing, error, artwork, onPrevious, onToggle, onNext, volume, active = pager.currentPage == 0)
                     mode == WatchMode.WATCH && page == 1 -> {
                         val opened = openList
-                        if (opened != null) WatchPlaylist(opened, openTracks, onCloseList, onPlayList, onPlayTrack, onRetryTracks)
+                        if (opened != null) WatchPlaylist(opened, openTracks, onCloseList, onPlayList, onPlayTrack, onRetryTracks, onShuffleList)
                         else WatchLibrary(lists, onOpen, onRetry, extensionsNote, onSyncExtensions)
                     }
-                    else -> WatchModePage(mode, onModeChange, updateAuto, onUpdateAutoChange, updateChecking, updateMessage, updateIsError, updateLastChecked, onCheckUpdates)
+                    else -> WatchModePage(mode, onModeChange, updateAuto, onUpdateAutoChange, updateChecking, updateMessage, updateIsError, updateLastChecked, onCheckUpdates, pullsUsage, onClearPulls)
                 }
             }
         }
@@ -153,6 +156,8 @@ internal fun WatchModePage(
     updateIsError: Boolean = false,
     updateLastChecked: String = "",
     onCheckUpdates: () -> Unit = {},
+    pullsUsage: String = "",
+    onClearPulls: () -> Unit = {},
 ) {
     val state = rememberTransformingLazyColumnState()
     val spec = rememberTransformationSpec()
@@ -209,6 +214,21 @@ internal fun WatchModePage(
                     color = if (updateIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+            // The songs pulled from the phone (Scadify v21): how much of the watch they
+            // take — capped at 250 MB, oldest-played evicted first — and their Clear.
+            item {
+                ListHeader(Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec)) {
+                    Text(stringResource(R.string.wear_pulls_header))
+                }
+            }
+            item {
+                Button(
+                    onClick = onClearPulls,
+                    colors = ButtonDefaults.filledTonalButtonColors(),
+                    secondaryLabel = { Text(pullsUsage, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
+                ) { Text(stringResource(R.string.wear_pulls_clear), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
         }
     }
@@ -467,10 +487,11 @@ internal fun WatchLibrary(
 
 /**
  * One list, opened from the library (v19: a tap on a list used to start it playing at
- * once; now the tap opens it, and playing is the Play button's job — the whole list from
- * its first song an extension has — or a song's own tap, which plays the list from that
- * song). Songs that are files of the phone are marked as such; the watch cannot play
- * them (Phone mode plays them there).
+ * once; now the tap opens it, and playing is the Play button's job — the whole list in
+ * its order — or a song's own tap, which plays the list from that song). The Shuffle
+ * button (v21) plays the list in a fresh random order instead. Songs that are files of
+ * the phone are marked as such; in Watch mode the watch pulls and plays them itself
+ * (v21), in Phone mode the phone plays them there.
  */
 @Composable
 internal fun WatchPlaylist(
@@ -480,6 +501,7 @@ internal fun WatchPlaylist(
     onPlayList: (WatchList) -> Unit,
     onPlayTrack: (Int) -> Unit,
     onRetry: () -> Unit,
+    onShuffleList: (WatchList) -> Unit = {},
 ) {
     val state = rememberTransformingLazyColumnState()
     val spec = rememberTransformationSpec()
@@ -502,6 +524,12 @@ internal fun WatchPlaylist(
                     secondaryLabel = list.subtitle.takeIf { it.isNotBlank() }?.let { s -> { Text(s, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
                     modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
                 ) { Text(stringResource(R.string.wear_play), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+            item {
+                Button(
+                    onClick = { onShuffleList(list) }, colors = ButtonDefaults.filledTonalButtonColors(),
+                    modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
+                ) { Text(stringResource(R.string.wear_shuffle), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
             when {
                 tracks == null -> item {

@@ -57,6 +57,32 @@ class WatchLocalAnswersTest {
         assertEquals("Local Artist", rows[0].getJSONArray("artists").getString(0))
     }
 
+    @Test fun localTracksCarryTheFileAddressForTheWatchPull() {
+        val p = LocalPlaylist(id = "lp1", name = "Road Mix", items = listOf(localItem("A")), createdAt = 1L)
+        val row = WatchLocalAnswers.localTracks(p).single()
+        assertEquals("local:content://media/A", row.getString("localUri"))
+    }
+
+    @Test fun likedPhoneFilesCarryTheFileAddressAndCatalogLikesDoNot() {
+        val rows = WatchLocalAnswers.likedTracks(
+            catalog = listOf(CatalogLike(trackId = "xyz789", title = "Cat Song", artist = "Cat Artist", album = "Cat Album",
+                coverUri = "", durationMs = 210_000L, url = "")),
+            local = listOf(localItem("Liked File")),
+        )
+        assertFalse("a catalogue like is not a phone file", rows[0].has("localUri"))
+        assertEquals("local:content://media/Liked File", rows[1].getString("localUri"))
+    }
+
+    @Test fun importedTrackWithNoIdentityHasNoFileAddress() {
+        val p = ImportedPlaylist(
+            id = "ip1", name = "Sunday", sourceUrl = "", createdAt = 2L,
+            items = listOf(importedSong("", "")),
+        )
+        val row = WatchLocalAnswers.importedTracks(p).single()
+        assertTrue(row.getBoolean("phoneOnly"))
+        assertFalse("an imported song is not a file the watch can pull", row.has("localUri"))
+    }
+
     @Test fun importedTracksCarryIdIsrcAndCover() {
         val p = ImportedPlaylist(
             id = "ip1", name = "Sunday", sourceUrl = "https://open.spotify.com/playlist/x", createdAt = 2L,

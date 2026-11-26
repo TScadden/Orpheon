@@ -28,10 +28,11 @@ import kotlinx.coroutines.launch
 /**
  * The watch's pages: what plays (its name, its artists, previous, play or pause, next, the
  * volume), then, a swipe away, the playlists as the phone lists them — a tap opens one, and
- * its Play button or a song's tap plays it on the watch from its own extensions
- * ([WatchPlay]) — and the mode switch. Two modes ([WatchModes]): Phone, where the player
- * page mirrors the phone's song and its buttons drive the phone's player; Watch, where the
- * watch plays on its own. (The library is a Watch-mode page; Phone mode has none.)
+ * its Play or Shuffle button or a song's tap plays it on the watch from its own sources
+ * ([WatchPlay]: the extensions, and pulls of the phone's own files) — and the mode switch.
+ * Two modes ([WatchModes]): Phone, where the player page mirrors the phone's song and its
+ * buttons drive the phone's player; Watch, where the watch plays on its own. (The library
+ * is a Watch-mode page; Phone mode has none.)
  */
 class WatchActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,7 +53,11 @@ internal fun WatchApp() {
     val extensions by WatchExtensions.installed.collectAsState()
     val ui = rememberCoroutineScope()
     var syncNote by remember { mutableStateOf<String?>(null) }
-    remember { WatchExtensions.init(app); WatchModes.init(app); PhonePlayingState.load(app); WearUpdatePref.init(app) }
+    remember { WatchExtensions.init(app); WatchModes.init(app); PhonePlayingState.load(app); WearUpdatePref.init(app); WatchPulls.init(app) }
+    // The on-watch songs (v21's pulls): their size for the mode page, refreshed when a
+    // play starts a pull and when the page's Clear empties them.
+    var pullsVersion by remember { mutableStateOf(0) }
+    val pullsUsageMb = remember(pullsVersion) { (WatchPulls.usageBytes(app) / (1024 * 1024)).toInt() }
     val mode by WatchModes.mode.collectAsState()
     // The extensions' player gives no position on its own: read every second while it has a song.
     val local = localNow
@@ -198,15 +203,19 @@ internal fun WatchApp() {
         openList = openList,
         openTracks = openTracks,
         onCloseList = { openList = null },
-        onPlayList = { error = null; WatchPlay.play(context, it.uri) { e -> error = e } },
+        onPlayList = { error = null; pullsVersion++; WatchPlay.play(context, it.uri) { e -> error = e } },
+        onShuffleList = { error = null; pullsVersion++; WatchPlay.playShuffled(context, it.uri) { e -> error = e } },
         onPlayTrack = { i ->
             val opened = openList
             val songs = openTracks?.getOrNull()
             if (opened != null && songs != null) {
                 error = null
+                pullsVersion++
                 WatchPlay.playTrack(context, opened.uri, songs, i) { e -> error = e }
             }
         },
+        pullsUsage = stringResource(R.string.wear_pulls_usage, pullsUsageMb),
+        onClearPulls = { WatchPulls.clear(app); pullsVersion++ },
         onRetryTracks = { tracksAttempt++ },
         extensionsNote = syncNote ?: stringResource(R.string.wear_extensions_count, extensions.size),
         onSyncExtensions = {
@@ -250,29 +259,33 @@ private fun rememberWatchVolume(): WatchVolumeUi {
 }
 
 /**
- * A list tapped on the watch: from the watch's own extensions when one has its songs (the songs
- * from the phone, or the last ones read). Songs the phone marked phone-only are never asked of
- * the extensions — they are files of the phone, and the screen says so when a list is all such.
- * With nothing playable, nothing plays and the screen says why.
+ * A list played on the watch: its songs (from the phone, or the last ones read) play
+ * from the watch's own sources — the extensions for catalogue songs, and, since v21,
+ * pulls from the phone for the phone's own files. With nothing playable, nothing
+ * plays and the screen says why.
  */
 object WatchPlay {
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
 
-    fun play(context: android.content.Context, uri: String, failed: (String) -> Unit) {
+    /** The list in its own order, from its first song the watch can play. */
+    fun play(context: android.content.Context, uri: String, failed: (String) -> Unit) =
+        playOrdered(context, uri, shuffle = false, failed)
+
+    /** The list in a fresh random order (v21's Shuffle), from its first playable song. */
+    fun playShuffled(context: android.content.Context, uri: String, failed: (String) -> Unit) =
+        playOrdered(context, uri, shuffle = true, failed)
+
+    private fun playOrdered(context: android.content.Context, uri: String, shuffle: Boolean, failed: (String) -> Unit) {
         val app = context.applicationContext
         scope.launch {
             WatchExtensions.init(app)
-            val tracks = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val fetched = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching { PhoneLink(app).tracks(uri) }.getOrNull().orEmpty()
             }
-            val fromExtensions = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                if (!WatchExtensions.hasAudio()) return@withContext null
-                // The first of the first few resolvable songs an extension has.
-                tracks.indices.filter { !tracks[it].phoneOnly }.take(5)
-                    .firstNotNullOfOrNull { i -> WatchExtensions.audio(tracks[i])?.let { Triple(tracks, i, it) } }
-            }
-            if (fromExtensions != null) {
-                WatchLocal.play(app, fromExtensions.first, fromExtensions.second, fromExtensions.third, uri = uri)
+            val tracks = order(fetched, shuffle)
+            val start = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { firstPlayable(app, tracks) }
+            if (start != null) {
+                WatchLocal.play(app, tracks, start.first, start.second, uri = uri, failed = failed)
             } else {
                 WatchLocal.stop()
                 failed(app.getString(
@@ -281,12 +294,44 @@ object WatchPlay {
         }
     }
 
+    /**
+     * The first song of [tracks] the watch can play, with its audio resolved: a phone
+     * file's pull is started, another song is asked of the extensions (the first few
+     * tried). A phone-only song with no file address is passed over — the watch cannot
+     * play it at all.
+     */
+    private suspend fun firstPlayable(app: android.content.Context, tracks: List<WatchTrack>): Pair<Int, WatchSource>? {
+        var extensionTries = 0
+        for (i in tracks.indices) {
+            val t = tracks[i]
+            when {
+                t.pullable -> return i to WatchSource.Pulled(WatchPulls.open(app, t))
+                t.phoneOnly -> Unit
+                extensionTries < 5 -> {
+                    extensionTries++
+                    if (WatchExtensions.hasAudio()) {
+                        WatchExtensions.audio(t)?.let { return i to WatchSource.Stream(it) }
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    /** The order a list plays in: its own, or a fresh shuffle (v21). */
+    internal fun order(tracks: List<WatchTrack>, shuffle: Boolean): List<WatchTrack> =
+        if (shuffle) tracks.shuffled() else tracks
+
     /** A song tapped in an opened list: the list plays on the watch from that song. */
     fun playTrack(context: android.content.Context, uri: String, tracks: List<WatchTrack>, index: Int, failed: (String) -> Unit) {
         val app = context.applicationContext
         scope.launch {
             WatchExtensions.init(app)
             val track = tracks.getOrNull(index) ?: return@launch
+            if (track.pullable) {
+                WatchLocal.play(app, tracks, index, WatchSource.Pulled(WatchPulls.open(app, track)), uri = uri, failed = failed)
+                return@launch
+            }
             if (track.phoneOnly) {
                 failed(app.getString(R.string.wear_phone_only_one))
                 return@launch
@@ -295,7 +340,7 @@ object WatchPlay {
                 if (WatchExtensions.hasAudio()) WatchExtensions.audio(track) else null
             }
             if (found != null) {
-                WatchLocal.play(app, tracks, index, found, uri = uri)
+                WatchLocal.play(app, tracks, index, WatchSource.Stream(found), uri = uri, failed = failed)
             } else {
                 WatchLocal.stop()
                 failed(app.getString(R.string.wear_no_source))
