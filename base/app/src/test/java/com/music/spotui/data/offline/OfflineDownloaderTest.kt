@@ -8,10 +8,10 @@ import org.junit.Test
 
 class OfflineDownloaderTest {
     @Test fun aRepairedSongsFailedDownloadIsForgottenButNothingElseIs() {
-        // The playlist repair gained this song its ISRC: its earlier failure was the
-        // missing ISRC's, so the failure is forgotten — badge and retry request gone,
-        // back to plain not-downloaded. A download still in flight is not a failure
-        // and is left exactly as it is.
+        // The playlist repair completed this song's stored row: its earlier failure
+        // belonged to the broken row's era, so the failure is forgotten — badge and
+        // retry request gone, back to plain not-downloaded. A download still in
+        // flight is not a failure and is left exactly as it is.
         OfflineDownloader.requests["AAA"] = OfflineDownloader.Request(
             trackId = "AAA", title = "One", artist = "Artist A", album = "Alb",
             albumId = "", durationMs = 201_000L, coverUrl = "",
