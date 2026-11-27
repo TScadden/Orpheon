@@ -1053,6 +1053,18 @@ class Api constructor(
     )
 
     /**
+     * The row of the imported playlist [playlistId] that plays under [identity] (a MixEdits
+     * track identity), as the very track the player gets for it — the Mix editor resolves its
+     * pair through this, so the identity it edits under is the identity playback plans under.
+     */
+    fun importedPlayableTrack(playlistId: String, identity: String): com.music.spotui.data.local.LocalTrack? {
+        val p = ImportedPlaylists.get(playlistId) ?: return null
+        return p.items.asSequence().map(::importedSongOf)
+            .map { com.music.spotui.extensions.ExtensionAudio.localTrack(it) }
+            .firstOrNull { com.music.spotui.data.local.MixEdits.trackIdentity(it.uri) == identity }
+    }
+
+    /**
      * An imported playlist as a page: read from this phone alone (its store), whole at once.
      * Its type is "imported": the context screens let its rows be removed and the list be
      * renamed, which the account's editable check would never allow with no account.

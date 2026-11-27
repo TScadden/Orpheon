@@ -11,10 +11,10 @@ android {
     compileSdk = 37
 
     // Scadify's own numbering, as the phone's app: the default is the current shipped build's
-    // number ("29" = v29, versionCode 200 + the number), bumped with every shipped version.
+    // number ("30" = v30, versionCode 200 + the number), bumped with every shipped version.
     // The in-app updater compares versionNames numerically and requires the release's APK
     // to carry the release's number, so bump both defaults with every shipped version.
-    val version = (findProperty("appVersionName") as String?) ?: "29"
+    val version = (findProperty("appVersionName") as String?) ?: "30"
     val beta = findProperty("appVersionName") == null || version.contains("-beta")
     // As the phone's app (base/app): -Pclean is the shipped channel, its own app (id suffix .clean).
     val cleanApp = findProperty("clean") != null
@@ -23,7 +23,7 @@ android {
         applicationId = if (beta) "app.orpheon.beta" else "app.orpheon"
         minSdk = 30
         targetSdk = 36
-        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 229
+        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 230
         versionName = version
         // GitHub "owner/repo" whose releases the watch app checks for updates; empty = off
         // (local builds). The shipped (clean) debug build sets its own repo below: the

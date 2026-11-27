@@ -1221,19 +1221,31 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
         }
         // While a song is moved: the rows in the order under the finger.
         val (listed, keys) = drag.order?.takeIf { reordering }?.let { o -> o to o.map(PlaylistReorder::key) } ?: shown
-        itemsIndexed(listed, key = { i, _ -> keys[i] }) { _, song ->
-            com.music.spotui.ui.components.SwipeToQueue(song, if (reordering) movableRow(drag, song, tone(0xFF2A2A2A)) else animatedRow()) { TrackRow(
-                song = song,
-                showCover = p.type != "album",
-                isCurrent = song.id == currentSongId,
-                saved = com.music.spotui.di.trackSaved(song.spotifyTrackId, saved),
-                offline = com.music.spotui.data.offline.OfflineStore.statusOf(song.spotifyTrackId),
-                addedBy = vm.adders.value.let { a -> a["row:" + song.rowUid] ?: a["song:" + song.spotifyTrackId] },
-                onClick = { dismissKeyboard(); if (SmartShuffle.on.value == p.uri) vm.playSmart(p, song) else vm.play(p, song, sort) },
-                onMore = { menuSong = song },
-                onSaved = { savedInSong = song },
-                handle = if (reordering) drag.handle(song.rowUid) else null,
-            ) }
+        itemsIndexed(listed, key = { i, _ -> keys[i] }) { index, song ->
+            Column {
+                com.music.spotui.ui.components.SwipeToQueue(song, if (reordering) movableRow(drag, song, tone(0xFF2A2A2A)) else animatedRow()) { TrackRow(
+                    song = song,
+                    showCover = p.type != "album",
+                    isCurrent = song.id == currentSongId,
+                    saved = com.music.spotui.di.trackSaved(song.spotifyTrackId, saved),
+                    offline = com.music.spotui.data.offline.OfflineStore.statusOf(song.spotifyTrackId),
+                    addedBy = vm.adders.value.let { a -> a["row:" + song.rowUid] ?: a["song:" + song.spotifyTrackId] },
+                    onClick = { dismissKeyboard(); if (SmartShuffle.on.value == p.uri) vm.playSmart(p, song) else vm.play(p, song, sort) },
+                    onMore = { menuSong = song },
+                    onSaved = { savedInSong = song },
+                    handle = if (reordering) drag.handle(song.rowUid) else null,
+                ) }
+                // An imported playlist's junction into the next song: its Mix editor (and a saved mix's marker).
+                if (p.type == "imported" && index < listed.lastIndex && find.isBlank() && !reordering) {
+                    val mixKey = "imported:" + p.uri.removePrefix("scadify:imported:")
+                    val idA = com.music.spotui.data.local.MixEdits.trackIdentity(com.music.spotui.extensions.ExtensionAudio.localTrack(song).uri)
+                    val idB = com.music.spotui.data.local.MixEdits.trackIdentity(com.music.spotui.extensions.ExtensionAudio.localTrack(listed[index + 1]).uri)
+                    com.music.spotui.ui.components.MixJunctionStrip(
+                        edited = com.music.spotui.data.local.MixEdits.has(mixKey, idA, idB),
+                        immersive = false,
+                    ) { navController.navigate(com.music.spotui.ui.navigation.mixEditorRoute(mixKey, idA, idB)) }
+                }
+            }
         }
         // "Recommended songs", as under an own playlist in the official apps (an empty one too).
         if (p.type == "playlist" && vm.editableContext.value && find.isBlank() && !p.isBlend) recommendedItems(vm, p, ctx, currentSongId)

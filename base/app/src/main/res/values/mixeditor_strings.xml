@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Mix editor (a hand-placed transition for one playlist junction) and its junction strips. -->
+<resources>
+    <string name="mix_junction">Mix</string>
+    <string name="mix_junction_edited">Mix · Edited</string>
+    <string name="mix_editor_title">Mix</string>
+    <string name="mix_analyzing">Analyzing both songs…</string>
+    <string name="mix_couldnt_title">This junction can\'t be mixed yet</string>
+    <string name="mix_couldnt_body">%1$s couldn\'t be analyzed, so there is nothing to mix with yet.</string>
+    <string name="mix_couldnt_mobile_data">%1$s wasn\'t analyzed: it is a stream and the phone is on mobile data. Connect to Wi-Fi or turn on “Analyze on mobile data” in the AutoMix settings, then try again.</string>
+    <string name="mix_preview">Preview</string>
+    <string name="mix_save">Save mix</string>
+    <string name="mix_reset_auto">Reset to auto</string>
+    <string name="mix_bars">%1$d bars</string>
+    <string name="mix_style_blend">Blend</string>
+    <string name="mix_style_cut">Cut</string>
+    <string name="mix_style_fade">Fade</string>
+    <string name="mix_eq_label">DJ EQ &amp; bass swap</string>
+    <string name="mix_ends_at_end">Ends at the song\'s end</string>
+    <string name="mix_ends_early">Ends %1$d bars early</string>
+    <string name="mix_cut_note">A cut lands on the beat — its length is two beats, so bars don\'t apply.</string>
+    <string name="mix_automix_off">AutoMix is off — previews and saved mixes play through it.</string>
+    <string name="mix_turn_on_automix">Turn on AutoMix</string>
+    <string name="mix_no_fit">That window doesn\'t fit these songs — try fewer bars, end it earlier, or pick another style.</string>
+    <string name="mix_header_stats">%1$s BPM · %2$s · %3$s</string>
+    <string name="mix_saved_note">Saved — this junction plays your mix.</string>
+</resources>

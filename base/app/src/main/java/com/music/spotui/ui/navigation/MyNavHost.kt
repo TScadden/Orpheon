@@ -277,6 +277,22 @@ fun MyNavHost(
         }
 
         page(
+            "${Routes.MixEditor.route}?list={list}&a={a}&b={b}",
+            arguments = listOf(
+                navArgument("list") { defaultValue = "" },
+                navArgument("a") { defaultValue = "" },
+                navArgument("b") { defaultValue = "" },
+            ),
+        ) { navBackStackEntry ->
+            com.music.spotui.ui.screens.MixEditorScreen(
+                navHostController,
+                navBackStackEntry.arguments?.getString("list").orEmpty(),
+                navBackStackEntry.arguments?.getString("a").orEmpty(),
+                navBackStackEntry.arguments?.getString("b").orEmpty(),
+            )
+        }
+
+        page(
             "${Routes.ArtistReleases.route}/{aString}?id={artistId}",
             arguments = listOf(navArgument("artistId") { defaultValue = "" }),
         ) { navBackStackEntry ->

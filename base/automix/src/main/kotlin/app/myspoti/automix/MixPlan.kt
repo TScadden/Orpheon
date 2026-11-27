@@ -37,6 +37,11 @@ class MixPlan(
     val filtered: Boolean = false,
     /** The data plan this timing was read from; when set, the engine plays its lanes, not [levels]. */
     val segue: app.myspoti.automix.segue.SeguePlan? = null,
+    /**
+     * The listener's own DJ-EQ choice for this transition (a hand-placed Mix editor plan);
+     * null on every automatic plan: the global DJ-EQ setting decides there.
+     */
+    val userEq: Boolean? = null,
 ) {
     enum class Style {
         /** Beat-matched blend over several bars with a bass swap. */

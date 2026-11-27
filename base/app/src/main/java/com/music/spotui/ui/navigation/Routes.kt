@@ -32,6 +32,8 @@ sealed class Routes(
     object LocalPlaylist : Routes(0, "LocalPlaylist", "localplaylist")
     object LocalAlbum : Routes(0, "LocalAlbum", "localalbum")
     object ImportedPlaylist : Routes(0, "ImportedPlaylist", "importedplaylist")
+    /** The Mix editor for one junction of a playlist (see MixEdits). */
+    object MixEditor : Routes(0, "MixEditor", "mixeditor")
     object Category : Routes(0, "Category", "category")
     object NewReleases : Routes(0, "NewReleases", "newreleases")
     object Episodes : Routes(0, "Episodes", "episodes")
@@ -78,6 +80,10 @@ fun localAlbumRoute(artist: String, album: String): String =
 
 /** A playlist imported from a public link, by its store id (see ImportedPlaylists). */
 fun importedPlaylistRoute(id: String): String = "${Routes.ImportedPlaylist.route}/${android.net.Uri.encode(id)}"
+
+/** The Mix editor for the junction [idA] → [idB] of the playlist [playlistKey] (see MixEdits). */
+fun mixEditorRoute(playlistKey: String, idA: String, idB: String): String =
+    "${Routes.MixEditor.route}?list=${android.net.Uri.encode(playlistKey)}&a=${android.net.Uri.encode(idA)}&b=${android.net.Uri.encode(idB)}"
 
 /** Builds a podcast-show route carrying the Spotify show id (and a display name). */
 fun showRoute(id: String, name: String = ""): String =

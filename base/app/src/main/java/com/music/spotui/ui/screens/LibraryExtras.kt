@@ -838,6 +838,12 @@ fun androidx.compose.foundation.lazy.LazyListScope.localItems(
     onEnterSelection: (LocalItem) -> Unit = {},
     /** "Show album" for a row, where the screen can navigate (the row's album page). */
     onShowAlbum: ((LocalItem) -> Unit)? = null,
+    /** The play context URI handed to the player (a local playlist's own, so its saved mixes are found). */
+    contextUri: String = "",
+    /** The Mix editor's junction under each row but the last (the index of the row above it); null: no junctions. */
+    onMixJunction: ((Int) -> Unit)? = null,
+    /** Whether the junction under a row carries a saved mix (its marker). */
+    mixEdited: (Int) -> Boolean = { false },
 ) {
     itemsIndexed(items, key = { _, i -> i.key }) { index, item ->
         val np = SongPlayer.nowPlaying.value
@@ -849,13 +855,19 @@ fun androidx.compose.foundation.lazy.LazyListScope.localItems(
             LocalItemRow(item, LocalPlayer.active.value && np.uri == "local:${track.id}",
                 onClick = {
                     if (selecting) onToggle(item)
-                    else LocalPlayer.play(items.map { it.toTrack() }, index, context = context)
+                    else LocalPlayer.play(items.map { it.toTrack() }, index, context = context, contextUri = contextUri)
                 },
                 onMenu = { menu = true },
                 onLongClick = if (selecting) ({ if (selection.isEmpty()) onEnterSelection(item) else onToggle(item) }) else null,
                 selected = selection?.let { item.key in it })
         }
-        if (selecting) row() else SwipeToRemove(item.key, onRemove = { onRemove(item) }) { row() }
+        val rowBlock = @Composable { if (selecting) row() else SwipeToRemove(item.key, onRemove = { onRemove(item) }) { row() } }
+        if (onMixJunction != null && !selecting && index < items.lastIndex) {
+            Column {
+                rowBlock()
+                com.music.spotui.ui.components.MixJunctionStrip(edited = mixEdited(index), immersive = false) { onMixJunction(index) }
+            }
+        } else rowBlock()
         if (menu) com.music.spotui.ui.components.LookSheet(onDismissRequest = { menu = false }, containerColor = SheetColor) {
             Column(Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
                 SheetRow(Icons.Outlined.Edit, stringResource(R.string.local_edit_title_artist)) { menu = false; editing = true }
@@ -975,7 +987,8 @@ fun LocalPlaylistScreen(navController: NavController, id: String) {
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier.size(52.dp).pressable(0.92f) {
-                                LocalPlayer.play(playlist.items.map { it.toTrack() }, 0, context = playlist.name)
+                                LocalPlayer.play(playlist.items.map { it.toTrack() }, 0, context = playlist.name,
+                                    contextUri = com.music.spotui.data.local.MixEdits.localContextUri(id))
                             }.clip(CircleShape).background(Green),
                         ) {
                             Icon(painterResource(R.drawable.play_svgrepo_com), stringResource(R.string.lbl_play), tint = Color.Black, modifier = Modifier.size(24.dp))
@@ -991,6 +1004,17 @@ fun LocalPlaylistScreen(navController: NavController, id: String) {
                     onShowAlbum = { item ->
                         if (item.album.isNotBlank()) navController.navigate(com.music.spotui.ui.navigation.localAlbumRoute(item.artist, item.album))
                         else Toast.makeText(context, context.getString(R.string.local_no_album), Toast.LENGTH_SHORT).show()
+                    },
+                    contextUri = com.music.spotui.data.local.MixEdits.localContextUri(id),
+                    mixEdited = { index ->
+                        com.music.spotui.data.local.MixEdits.has("local:$id",
+                            com.music.spotui.data.local.MixEdits.trackIdentity(android.net.Uri.parse(playlist.items[index].uri)),
+                            com.music.spotui.data.local.MixEdits.trackIdentity(android.net.Uri.parse(playlist.items[index + 1].uri)))
+                    },
+                    onMixJunction = { index ->
+                        navController.navigate(com.music.spotui.ui.navigation.mixEditorRoute("local:$id",
+                            com.music.spotui.data.local.MixEdits.trackIdentity(android.net.Uri.parse(playlist.items[index].uri)),
+                            com.music.spotui.data.local.MixEdits.trackIdentity(android.net.Uri.parse(playlist.items[index + 1].uri))))
                     },
                 )
             }
