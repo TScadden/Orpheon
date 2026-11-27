@@ -68,8 +68,21 @@ class Deezer(private val fetch: Fetch, private val base: String = "https://api.d
     override suspend fun topTracks(id: String): List<Hit> = json("/artist/${id.q()}/top?limit=10").objects("data").map { track(it, null) }
 
     /** The worldwide chart's tracks right now ("popular this week"), most played first. Public, no key. */
-    suspend fun chartTracks(limit: Int = 20): List<Hit> =
-        json("/chart/0/tracks?limit=$limit").objects("data").map { track(it, null) }
+    suspend fun chartTracks(limit: Int = 20): List<Hit> = chartTracks(ALL_GENRES, limit)
+
+    /** One of Deezer's chart genres, as its /genre listing names it (id 0 is "All"). */
+    data class Genre(val id: Int, val name: String)
+
+    /** The genres Deezer keeps a chart for, in its own order. Public, no key. */
+    suspend fun genres(): List<Genre> =
+        json("/genre").objects("data").mapNotNull { o ->
+            val name = o.str("name")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            Genre((o.long("id") ?: return@mapNotNull null).toInt(), name)
+        }
+
+    /** A genre's chart tracks right now ("popular this week" in it), most played first. Public, no key. */
+    suspend fun chartTracks(genreId: Int, limit: Int = 20): List<Hit> =
+        json("/chart/$genreId/tracks?limit=$limit").objects("data").map { track(it, null) }
 
     override suspend fun discography(id: String, offset: Int, limit: Int): Page<Album> {
         val o = json("/artist/${id.q()}/albums?index=$offset&limit=$limit")
@@ -125,5 +138,7 @@ class Deezer(private val fetch: Fetch, private val base: String = "https://api.d
 
     private companion object {
         const val NO_DATA = 800
+        /** The /genre id of "All": the worldwide chart. */
+        const val ALL_GENRES = 0
     }
 }
