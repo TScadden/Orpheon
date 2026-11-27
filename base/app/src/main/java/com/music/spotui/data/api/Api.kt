@@ -1057,7 +1057,7 @@ class Api constructor(
      * track identity), as the very track the player gets for it — the Mix editor resolves its
      * pair through this, so the identity it edits under is the identity playback plans under.
      */
-    fun importedPlayableTrack(playlistId: String, identity: String): com.music.spotui.di.LocalTrack? {
+    fun importedPlayableTrack(playlistId: String, identity: String): com.music.spotui.data.local.LocalTrack? {
         val p = ImportedPlaylists.get(playlistId) ?: return null
         return p.items.asSequence().map(::importedSongOf)
             .map { com.music.spotui.extensions.ExtensionAudio.localTrack(it) }

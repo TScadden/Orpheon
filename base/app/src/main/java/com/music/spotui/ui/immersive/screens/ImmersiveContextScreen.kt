@@ -618,12 +618,13 @@ private fun ImmersiveContextContent(navController: NavController, vm: ContextVie
                     if (index < rows.lastIndex) ImmersiveRowDivider(if (numbered) NumberedDividerInset else ImmersiveRowDividerInset)
                     // An imported playlist's junction into the next song: its Mix editor (and a saved mix's marker).
                     if (p.type == "imported" && index < listed.lastIndex && find.isBlank() && !reordering) {
+                        val mixKey = "imported:" + p.uri.removePrefix("scadify:imported:")
                         val idA = com.music.spotui.data.local.MixEdits.trackIdentity(com.music.spotui.extensions.ExtensionAudio.localTrack(song).uri)
                         val idB = com.music.spotui.data.local.MixEdits.trackIdentity(com.music.spotui.extensions.ExtensionAudio.localTrack(listed[index + 1]).uri)
                         com.music.spotui.ui.components.MixJunctionStrip(
-                            edited = com.music.spotui.data.local.MixEdits.has("imported:$id", idA, idB),
+                            edited = com.music.spotui.data.local.MixEdits.has(mixKey, idA, idB),
                             immersive = true,
-                        ) { navController.navigate(com.music.spotui.ui.navigation.mixEditorRoute("imported:$id", idA, idB)) }
+                        ) { navController.navigate(com.music.spotui.ui.navigation.mixEditorRoute(mixKey, idA, idB)) }
                     }
                 }
             }
