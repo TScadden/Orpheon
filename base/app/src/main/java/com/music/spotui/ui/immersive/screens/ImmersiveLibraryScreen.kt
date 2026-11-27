@@ -355,7 +355,7 @@ private fun libraryEntries(entries: Response<List<LibraryEntry>>): Pair<List<Lib
     val localSubtitle = stringResource(R.string.lbl_playlist) + " • " + stringResource(R.string.local_playlist_subtitle)
     // Each imported playlist's own origin, from the one source of truth the playlist
     // page reads too — an Amazon import must not read "Imported from Spotify" here.
-    val importedSubtitle = { p: com.music.spotui.data.local.ImportedPlaylist ->
+    val importedSubtitle: @Composable (com.music.spotui.data.local.ImportedPlaylist) -> String = { p ->
         stringResource(R.string.lbl_playlist) + " • " + stringResource(
             com.music.spotui.data.api.importedOriginLabelRes(com.music.spotui.data.api.importedOrigin(p)),
         )
