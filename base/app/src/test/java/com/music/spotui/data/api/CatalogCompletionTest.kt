@@ -131,6 +131,38 @@ class CatalogCompletionTest {
         assertTrue(CatalogCompletion.accepted(selfTitled, hit(title = "Anything", artists = listOf("Anyone"))))
     }
 
+    @Test fun completionAttachesTheCatalogKeyAnIdlessRowPlaysUnder() = runBlocking {
+        // An Amazon-shaped row: no Spotify id. The completion's hit carries its
+        // catalog key, and the completed row plays under it (playId) — the
+        // identity the extensions are asked by, which an ISRC alone never was.
+        val idless = ImportedSong("k", "", "Blue Sky", "The Testers", "", 200_000, "")
+        val keyed = hit().copy(catalogKey = "deezer.3135556")
+        val out = CatalogCompletion.complete(listOf(idless), CatalogCompletion.Gatherer { listOf(keyed) })
+        assertEquals("deezer.3135556", out[0].catalogKey)
+        assertEquals("deezer.3135556", out[0].playId)
+        // A candidate that fails the strict bar attaches nothing, key included.
+        val loose = hit(title = "Blue Skies Forever").copy(catalogKey = "deezer.9999999")
+        val refused = CatalogCompletion.complete(listOf(idless), CatalogCompletion.Gatherer { listOf(loose) })
+        assertEquals("", refused[0].catalogKey)
+        assertEquals("", refused[0].playId)
+        // A key the row already carries stands against a different offer.
+        val held = idless.copy(catalogKey = "deezer.111")
+        val kept = CatalogCompletion.complete(listOf(held), CatalogCompletion.Gatherer { listOf(keyed) })
+        assertEquals("deezer.111", kept[0].catalogKey)
+    }
+
+    @Test fun anIdlessRowWithEveryOtherFieldIsStillThinUntilItHasAKey() {
+        // An Amazon row the page itself furnished with album, cover and (through
+        // an earlier pass) an ISRC and a judgement is still thin while it has no
+        // catalog key: the key is its playable identity, so the pass must still
+        // gather for it. With a key — or with a Spotify id — it is left alone.
+        val full = ImportedSong("k", "", "Blue Sky", "The Testers", "Sky Album", 200_000, "https://img/c.jpg", "USRC10000001")
+            .copy(explicit = app.myspoti.api.Explicitness.CLEAN)
+        assertTrue(CatalogCompletion.thin(full))
+        assertFalse(CatalogCompletion.thin(full.copy(catalogKey = "deezer.3135556")))
+        assertFalse(CatalogCompletion.thin(full.copy(spotifyTrackId = "tid")))
+    }
+
     @Test fun aFailingGathererLeavesTheSongAsItWas() = runBlocking {
         val out = CatalogCompletion.complete(listOf(song()), CatalogCompletion.Gatherer { throw RuntimeException("down") })
         assertEquals(song(), out[0])

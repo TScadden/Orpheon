@@ -37,6 +37,13 @@ import kotlin.math.abs
  * Only blanks are ever filled — a field a song already carries is never overwritten — and
  * the list itself never changes: same songs, same order. A song the catalog cannot answer
  * for (or a lookup that fails) is left exactly as it was.
+ *
+ * The pass also attaches the one field that makes an id-less row playable at all: the
+ * hit's catalog key ([Candidate.catalogKey]). The extensions are only ever asked for a
+ * song by an id — a Spotify id, or a catalog key — so an Amazon row the completion
+ * filled with an ISRC and a cover but no identity still could not play (seen on a
+ * phone: clean titles, covers, "No source plays" on every tap). The key is attached
+ * under the same strict bar as every other field, never looser.
  */
 object CatalogCompletion {
 
@@ -50,6 +57,9 @@ object CatalogCompletion {
         val isrc: String,
         /** The hit's stated explicitness (Deezer and iTunes state it): UNKNOWN when it does not. */
         val explicit: app.myspoti.api.Explicitness = app.myspoti.api.Explicitness.UNKNOWN,
+        /** The hit's own catalog key ("deezer.3135556"): the identity an id-less row
+         * completed from this hit plays under. "" when the hit's uri names no key. */
+        val catalogKey: String = "",
     )
 
     /** Where candidates come from: the live catalog chain, or a test's stand-in. */
@@ -62,10 +72,17 @@ object CatalogCompletion {
     /** Lookups in flight at once: the catalog is shared, polite infrastructure. */
     private const val IN_FLIGHT = 5
 
-    /** A song still missing any of the fields a completion can fill. */
+    /**
+     * A song still missing any of the fields a completion can fill. A row with no
+     * Spotify id is also thin while it carries no catalog key, however full its
+     * other fields read: the key is its playable identity, and a row the page
+     * itself furnished with a cover and an album (an Amazon row) is exactly the
+     * one that would otherwise never be gathered for and never play.
+     */
     fun thin(song: ImportedSong): Boolean =
         song.isrc.isBlank() || song.coverUrl.isBlank() || song.album.isBlank() ||
-            song.explicit == app.myspoti.api.Explicitness.UNKNOWN
+            song.explicit == app.myspoti.api.Explicitness.UNKNOWN ||
+            (song.spotifyTrackId.isBlank() && song.catalogKey.isBlank())
 
     /**
      * A song read wrong at its source: its title is its artist said again. An
@@ -121,12 +138,14 @@ object CatalogCompletion {
     }
 
     /** [song] with its blank ISRC / cover / album filled from [c]; present fields stand.
-     * An unjudged song also takes the candidate's stated explicitness; a stated one stands. */
+     * An unjudged song also takes the candidate's stated explicitness; a stated one stands.
+     * A song with no catalog key takes the candidate's: its playable identity. */
     fun completed(song: ImportedSong, c: Candidate): ImportedSong = song.copy(
         isrc = song.isrc.ifBlank { c.isrc },
         coverUrl = song.coverUrl.ifBlank { c.coverUrl },
         album = song.album.ifBlank { c.album },
         explicit = if (song.explicit == app.myspoti.api.Explicitness.UNKNOWN) c.explicit else song.explicit,
+        catalogKey = song.catalogKey.ifBlank { c.catalogKey },
     )
 
     /**
@@ -184,5 +203,6 @@ object CatalogCompletion {
         durationMs = track.durationMs,
         isrc = isrc.orEmpty(),
         explicit = track.explicitness,
+        catalogKey = CatalogRuntime.keyOf(track.uri).orEmpty(),
     )
 }
