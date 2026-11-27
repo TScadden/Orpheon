@@ -30,7 +30,7 @@ sealed interface DjMixState {
     data class FetchingPool(val category: DjCategory) : DjMixState
     data class Analyzing(val category: DjCategory, val done: Int, val total: Int) : DjMixState
     data class Sequencing(val category: DjCategory) : DjMixState
-    data class Done(val playlistId: String, val name: String, val summary: DjSummary) : DjMixState
+    data class Done(val playlistId: String, val name: String, val summary: DjSummary, val refusal: AutoMix.Reason? = null) : DjMixState
     data class Failed(val failure: DjFailure) : DjMixState
 }
 
@@ -116,6 +116,7 @@ class DjMixSession(private val scope: CoroutineScope) {
 
         // ── Analysis, in the engine's own batches ──
         val analyses = HashMap<String, TrackAnalysis>()
+        val askedTracks = ArrayList<com.music.spotui.data.local.LocalTrack>()
         state.value = DjMixState.Analyzing(category, 0, pool.size)
         val queue = ArrayDeque(pool)
         var done = 0
@@ -126,6 +127,7 @@ class DjMixSession(private val scope: CoroutineScope) {
             // Each song with the queue track the player itself would play it as:
             // its analysis is asked, and read back, under that track's address.
             val pairs = batch.mapNotNull { song -> modelByKey[song.key]?.let { song to ExtensionAudio.localTrack(it) } }
+            askedTracks += pairs.map { it.second }
             if (pairs.isNotEmpty()) {
                 AutoMix.request(pairs.map { it.second.uri }) {}
                 // Settled = analysed or refused, counted per song as it lands, so the bar moves
@@ -161,7 +163,13 @@ class DjMixSession(private val scope: CoroutineScope) {
             LocalPlaylists.addAllSongs(p.id, arranged.ordered.mapNotNull { modelByKey[it.key] })
             p.id
         }
-        state.value = DjMixState.Done(playlistId, name, arranged.summary)
+        // Why the unsequenced songs went unanalyzed, when one reason dominates them: the
+        // Done screen names it (a batch that all waited on mobile data is not a mystery).
+        val dominantRefusal = askedTracks
+            .filter { AutoMix.analysis(it.uri) == null }
+            .mapNotNull { AutoMix.missing(it.uri) }
+            .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+        state.value = DjMixState.Done(playlistId, name, arranged.summary, dominantRefusal)
     }
 
     private companion object {

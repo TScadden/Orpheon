@@ -15,5 +15,8 @@ internal class AnalysisRetry {
     }
 
     fun succeeded(key: String) { failures.remove(key) }
+
+    /** One song's backoff, forgiven: the user asked for a retry, so the next ask runs at once. */
+    fun forgiven(key: String) { failures.remove(key) }
     fun clear() { failures.clear() }
 }

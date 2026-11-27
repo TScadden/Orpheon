@@ -25,9 +25,10 @@ object Analyzer {
      * [mid] and [side] (or null) at [Features.RATE] Hz. With [model], Beat This reads the whole song
      * for the metrical level and the downbeats; without it (or when it finds no
      * beats) the onsets alone decide. [length]: the samples of the signals that are the song
-     * (see [Features.of]).
+     * (see [Features.of]). [onProgress] hears the feature pass's own frame fraction as it
+     * runs (Beat This runs beside it, uncounted — the features are the long pass).
      */
-    fun analyze(mid: FloatArray, side: FloatArray?, model: BeatThis? = null, cancelled: () -> Boolean = { false }, threads: Int = 1, length: Int = mid.size): TrackAnalysis {
+    fun analyze(mid: FloatArray, side: FloatArray?, model: BeatThis? = null, cancelled: () -> Boolean = { false }, threads: Int = 1, length: Int = mid.size, onProgress: (Float) -> Unit = {}): TrackAnalysis {
         // The onset features and Beat This side by side (the model reads the whole file; its beats
         // outside the audible part are dropped below).
         var feats: Features? = null
@@ -35,7 +36,7 @@ object Analyzer {
         val budget = max(1, threads)
         val split = max(1, budget / 2)
         parallel(if (model != null) 2 else 1, if (model != null && budget > 1) 2 else 1) { task ->
-            if (task == 0) feats = Features.of(mid, side, cancelled, if (model != null) split else budget, length)
+            if (task == 0) feats = Features.of(mid, side, cancelled, if (model != null) split else budget, length, onProgress)
             else act = model!!.run(mid, 0, length, cancelled, max(1, budget - split))
         }
         if (cancelled()) throw InterruptedException("analysis cancelled")

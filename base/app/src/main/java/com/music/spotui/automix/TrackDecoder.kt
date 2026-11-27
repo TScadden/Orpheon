@@ -43,7 +43,14 @@ object TrackDecoder {
         var convertMs = 0L; var restarts = 0
     }
 
-    fun decode(uri: Uri, cancelled: () -> Boolean): Pcm {
+    /**
+     * [onProgress] hears the decode's own truth as it goes — bytes read, the stream's total
+     * size when known (−1 when not), the decoded position and the song's duration in seconds
+     * (−1 when the format states none) — throttled, and once more at the end. It feeds the
+     * screens' percentages and the analysis watchdog's progress counter; it is never guessed
+     * from elapsed time.
+     */
+    fun decode(uri: Uri, cancelled: () -> Boolean, onProgress: (bytes: Long, totalBytes: Long, decodedSec: Double, durationSec: Double) -> Unit = { _, _, _, _ -> }): Pcm {
         val source = ByteSource(uri, cancelled)
         val extractor = MediaExtractor()
         try {
@@ -56,14 +63,147 @@ object TrackDecoder {
             val mime = format.getString(MediaFormat.KEY_MIME) ?: throw IOException("no audio codec")
             val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else -1L
             if (durationUs > maxSeconds() * 1_000_000L) throw IOException("song too long to analyse")
-            return run(extractor, format, mime, durationUs, cancelled).also { it.readMs = source.readNs / 1_000_000; it.bytes = source.readBytes; it.restarts = source.restarts }
+            val durationSec = if (durationUs > 0) durationUs / 1e6 else -1.0
+            var lastBytes = -1L; var lastSec = -1.0
+            fun emit(sec: Double, force: Boolean = false) {
+                val b = source.readBytes
+                if (force || b - lastBytes >= 256 * 1024 || sec - lastSec >= 0.5) {
+                    lastBytes = b; lastSec = sec
+                    onProgress(b, source.totalBytes, sec, durationSec)
+                }
+            }
+            return run(extractor, format, mime, durationUs, cancelled, ::emit).also {
+                emit(it.length.toDouble() / RATE, force = true)
+                it.readMs = source.readNs / 1_000_000; it.bytes = source.readBytes; it.restarts = source.restarts
+            }
         } finally {
             runCatching { extractor.release() }
             source.close()
         }
     }
 
-    private fun run(extractor: MediaExtractor, format: MediaFormat, mime: String, durationUs: Long, cancelled: () -> Boolean): Pcm {
+    /**
+     * The peaks alone, at envelope fidelity: the same source and codec as [decode], but the
+     * frames feed a [PeakAccumulator] by their own timestamps instead of materialising the
+     * resampled mid/side signals (two large arrays and a second pass over them). For a song
+     * whose analysis is already kept and only its waveform is missing — the full decode was
+     * the expensive way to redraw a picture. Without a stated duration there is no timeline
+     * to bucket against, so those (rare) songs fall back to the full decode's peaks.
+     */
+    fun decodePeaks(uri: Uri, cancelled: () -> Boolean, buckets: Int = WaveformPeaks.BUCKETS, onProgress: (bytes: Long, totalBytes: Long, decodedSec: Double, durationSec: Double) -> Unit = { _, _, _, _ -> }): FloatArray {
+        val source = ByteSource(uri, cancelled)
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(source)
+            val track = (0 until extractor.trackCount).firstOrNull {
+                extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+            } ?: throw IOException("no audio track")
+            extractor.selectTrack(track)
+            val format = extractor.getTrackFormat(track)
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: throw IOException("no audio codec")
+            val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else -1L
+            if (durationUs > maxSeconds() * 1_000_000L) throw IOException("song too long to analyse")
+            if (durationUs <= 0) {
+                val pcm = run(extractor, format, mime, durationUs, cancelled) {}
+                return WaveformPeaks.compute(pcm.mid, pcm.side, pcm.length, buckets)
+            }
+            val durationSec = durationUs / 1e6
+            var lastBytes = -1L; var lastSec = -1.0
+            fun emit(sec: Double, force: Boolean = false) {
+                val b = source.readBytes
+                if (force || b - lastBytes >= 256 * 1024 || sec - lastSec >= 0.5) {
+                    lastBytes = b; lastSec = sec
+                    onProgress(b, source.totalBytes, sec, durationSec)
+                }
+            }
+            val acc = PeakAccumulator(durationSec, buckets)
+            accumulate(extractor, format, mime, cancelled, acc, ::emit)
+            if (acc.coveredSec < 5.0) throw IOException("decoded audio too short")
+            emit(acc.coveredSec, force = true)
+            return acc.result()
+        } finally {
+            runCatching { extractor.release() }
+            source.close()
+        }
+    }
+
+    /** The codec loop of [decodePeaks]: every decoded frame into [acc] at its own timestamp. */
+    private fun accumulate(extractor: MediaExtractor, format: MediaFormat, mime: String, cancelled: () -> Boolean, acc: PeakAccumulator, emit: (Double) -> Unit) {
+        var channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+        var sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+        var encoding = if (format.containsKey(MediaFormat.KEY_PCM_ENCODING)) format.getInteger(MediaFormat.KEY_PCM_ENCODING) else AudioFormat.ENCODING_PCM_16BIT
+        var shorts = ShortArray(0); var floats = FloatArray(0)
+        fun take(buffer: ByteBuffer, baseSec: Double) {
+            val float = encoding == AudioFormat.ENCODING_PCM_FLOAT
+            if (!float && encoding != AudioFormat.ENCODING_PCM_16BIT) throw IOException("unsupported decoded PCM")
+            val values = buffer.remaining() / (if (float) 4 else 2)
+            val frames = values / channels
+            if (float) { if (floats.size < values) floats = FloatArray(values); buffer.asFloatBuffer().get(floats, 0, values) }
+            else { if (shorts.size < values) shorts = ShortArray(values); buffer.asShortBuffer().get(shorts, 0, values) }
+            val frameSec = 1.0 / sampleRate
+            for (i in 0 until frames) {
+                val at = i * channels
+                val l = if (float) floats[at] else shorts[at] / 32768f
+                val r = if (channels == 1) l else if (float) floats[at + 1] else shorts[at + 1] / 32768f
+                acc.add(if (l.isFinite()) l else 0f, if (r.isFinite()) r else 0f, baseSec + i * frameSec)
+            }
+            emit(baseSec + frames * frameSec)
+        }
+        if (mime == "audio/raw") {
+            val packet = ByteBuffer.allocateDirect(1 shl 20).order(ByteOrder.LITTLE_ENDIAN)
+            while (true) {
+                if (cancelled()) throw InterruptedException("cancelled")
+                packet.clear()
+                val size = extractor.readSampleData(packet, 0)
+                if (size < 0) break
+                val atSec = extractor.sampleTime / 1e6
+                packet.position(0); packet.limit(size)
+                take(packet, atSec)
+                extractor.advance()
+            }
+            return
+        }
+        val codec = MediaCodec.createDecoderByType(mime)
+        var started = false
+        try {
+            codec.configure(format, null, null, 0)
+            codec.start(); started = true
+            var inputDone = false
+            var ended = false
+            val info = MediaCodec.BufferInfo()
+            while (!ended) {
+                if (cancelled()) throw InterruptedException("cancelled")
+                while (!inputDone) {
+                    val slot = codec.dequeueInputBuffer(0)
+                    if (slot < 0) break
+                    val input = codec.getInputBuffer(slot) ?: throw IOException("no decoder input")
+                    val size = extractor.readSampleData(input, 0)
+                    if (size < 0) { codec.queueInputBuffer(slot, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM); inputDone = true }
+                    else { codec.queueInputBuffer(slot, 0, size, extractor.sampleTime, 0); extractor.advance() }
+                }
+                var slot = codec.dequeueOutputBuffer(info, 2000)
+                while (slot >= 0 || slot == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED || slot == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
+                    if (slot == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        val f = codec.outputFormat
+                        channels = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                        sampleRate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                        encoding = if (f.containsKey(MediaFormat.KEY_PCM_ENCODING)) f.getInteger(MediaFormat.KEY_PCM_ENCODING) else AudioFormat.ENCODING_PCM_16BIT
+                    } else if (slot >= 0) {
+                        val buf = codec.getOutputBuffer(slot)?.order(ByteOrder.LITTLE_ENDIAN)
+                        if (buf != null && info.size > 0) { buf.position(info.offset); buf.limit(info.offset + info.size); take(buf, info.presentationTimeUs / 1e6) }
+                        codec.releaseOutputBuffer(slot, false)
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) { ended = true; break }
+                    }
+                    slot = codec.dequeueOutputBuffer(info, 0)
+                }
+            }
+        } finally {
+            if (started) runCatching { codec.stop() }
+            codec.release()
+        }
+    }
+
+    private fun run(extractor: MediaExtractor, format: MediaFormat, mime: String, durationUs: Long, cancelled: () -> Boolean, report: (Double) -> Unit): Pcm {
         val out = Resampler(format.getInteger(MediaFormat.KEY_SAMPLE_RATE), durationUs)
         var channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
         var encoding = if (format.containsKey(MediaFormat.KEY_PCM_ENCODING)) format.getInteger(MediaFormat.KEY_PCM_ENCODING) else AudioFormat.ENCODING_PCM_16BIT
@@ -97,6 +237,7 @@ object TrackDecoder {
                 if (size < 0) break
                 packet.position(0); packet.limit(size)
                 take(packet)
+                report(extractor.sampleTime / 1e6)
                 extractor.advance()
             }
             return out.result().also { it.convertMs = convertNs / 1_000_000 }
@@ -130,7 +271,7 @@ object TrackDecoder {
                         out.rate(f.getInteger(MediaFormat.KEY_SAMPLE_RATE))
                     } else if (slot >= 0) {
                         val buf = codec.getOutputBuffer(slot)?.order(ByteOrder.LITTLE_ENDIAN)
-                        if (buf != null && info.size > 0) { buf.position(info.offset); buf.limit(info.offset + info.size); take(buf) }
+                        if (buf != null && info.size > 0) { buf.position(info.offset); buf.limit(info.offset + info.size); take(buf); report(info.presentationTimeUs / 1e6) }
                         codec.releaseOutputBuffer(slot, false)
                         if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) { ended = true; break }
                     }
@@ -197,6 +338,9 @@ object TrackDecoder {
 
         /** Time the decoder waited for bytes (ns), the bytes read, and the reads elsewhere (each starts again). */
         var readNs = 0L; var readBytes = 0L; var restarts = 0
+
+        /** The stream's total size once the source has stated it, −1 while (or if ever) unknown. */
+        val totalBytes: Long get() = if (sizeKnown) size else -1L
         /**
          * The last bytes handed to the decoder, by their offset: an MP4's extractor goes back a few
          * hundred KB at each fragment (to its samples after the box saying where they are), and each

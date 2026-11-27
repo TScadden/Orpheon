@@ -14,7 +14,7 @@ android {
     // number ("31" = v31, versionCode 200 + the number), bumped with every shipped version.
     // The in-app updater compares versionNames numerically and requires the release's APK
     // to carry the release's number, so bump both defaults with every shipped version.
-    val version = (findProperty("appVersionName") as String?) ?: "31"
+    val version = (findProperty("appVersionName") as String?) ?: "32"
     val beta = findProperty("appVersionName") == null || version.contains("-beta")
     // As the phone's app (base/app): -Pclean is the shipped channel, its own app (id suffix .clean).
     val cleanApp = findProperty("clean") != null
@@ -23,7 +23,7 @@ android {
         applicationId = if (beta) "app.orpheon.beta" else "app.orpheon"
         minSdk = 30
         targetSdk = 36
-        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 231
+        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 232
         versionName = version
         // GitHub "owner/repo" whose releases the watch app checks for updates; empty = off
         // (local builds). The shipped (clean) debug build sets its own repo below: the

@@ -14,6 +14,8 @@
     <string name="djmix_sequencing">Putting them in flow order…</string>
     <string name="djmix_done_all">%1$d songs, sequenced for flow.</string>
     <string name="djmix_done_appended">%1$d songs sequenced for flow. %2$d more are at the end in chart order — their audio couldn’t be analyzed.</string>
+    <string name="djmix_done_refused_mobile_data">Most of them were streams held back on mobile data: connect to Wi-Fi, or turn on “Analyze on mobile data” in the AutoMix settings, and build it again to sequence them.</string>
+    <string name="djmix_done_refused_failed">Most of them couldn’t be fetched or analyzed in time — building it again may sequence more of them.</string>
     <string name="djmix_too_few">Only %1$d songs in this week’s %2$s chart — too few for a mix (it needs at least %3$d).</string>
     <string name="djmix_too_few_clean">Only %1$d songs in this week’s Rap chart are known to be clean — too few for a mix (it needs at least %2$d). A song whose explicitness isn’t known never counts as clean.</string>
     <string name="djmix_chart_failed">Couldn’t read this week’s chart. Check your connection and try again.</string>
