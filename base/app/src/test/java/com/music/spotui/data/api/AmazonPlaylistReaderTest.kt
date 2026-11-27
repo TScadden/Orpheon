@@ -192,21 +192,25 @@ class AmazonPlaylistReaderTest {
     }
 
     @Test fun aCorrectlyReadRowOfTheGarbledPageCompletesIntoAPlayableIdentity() = runBlocking {
-        // Playability follows from the clean read: the row parsed off the garbled
-        // page completes on the strict bar and comes out carrying its ISRC — the
-        // identity playback matches sources by (with the clean title + artist as
-        // the play query), exactly like a Spotify import's row.
+        // Playability follows from the clean read plus the identity the completion
+        // attaches: the row parsed off the garbled page completes on the strict
+        // bar and comes out carrying its ISRC and its catalog key — the key is
+        // the id it plays under (ImportedSong.playId), the same kind of identity
+        // a Spotify import's row carries. (An ISRC alone never was one: the
+        // extensions are asked by id, and this row has no Spotify id.)
         val row = AmazonDom.parse(fixture("playlist_garbled.html")).rows.single()
         val gather = CatalogCompletion.Gatherer { song ->
             listOf(CatalogCompletion.Candidate(
                 title = song.title, artists = listOf(song.artist),
                 album = "The First Time", coverUrl = "https://img/too-much",
-                durationMs = 227_000L, isrc = "USRC12345678",
+                durationMs = 227_000L, isrc = "USRC12345678", catalogKey = "deezer.3135556",
             ))
         }
         val done = CatalogCompletion.complete(listOf(row), gather).single()
         assertEquals("Too Much", done.title)
         assertEquals("USRC12345678", done.isrc)
+        assertEquals("deezer.3135556", done.catalogKey)
+        assertEquals("deezer.3135556", done.playId)
         // The cover the page itself showed stands: completion fills blanks only.
         assertEquals("https://m.media-amazon.com/images/I/51too.jpg", done.coverUrl)
     }
@@ -219,22 +223,107 @@ class AmazonPlaylistReaderTest {
         // No new rows away from the bottom: not over, however often it repeats.
         val mid = CollectEnd()
         repeat(5) { assertFalse(mid.offer(added = 0, atBottom = false, declaredTotal = null, collected = 5)) }
-        // The true bottom repeating empty ends it — on the third empty rest, not before.
-        val end = CollectEnd()
+        // The true bottom repeating empty ends it — but only once the bottom has
+        // also stayed quiet for the whole lazy-load window. A chunk still loading
+        // shows the same empty bottom for a few passes, and ending there concluded
+        // collections inside the gap; the clock is driven by hand here.
+        var t = 0L
+        val end = CollectEnd(now = { t })
         assertFalse(end.offer(added = 0, atBottom = true, declaredTotal = null, collected = 5))
-        assertFalse(end.offer(added = 0, atBottom = true, declaredTotal = null, collected = 5))
-        assertTrue(end.offer(added = 0, atBottom = true, declaredTotal = null, collected = 5))
-        // A fresh row at the bottom resets the run of empty rests.
-        val reset = CollectEnd()
+        t += 1_100; assertFalse(end.offer(added = 0, atBottom = true, declaredTotal = null, collected = 5))
+        t += 1_100; assertFalse(end.offer(added = 0, atBottom = true, declaredTotal = null, collected = 5))
+        // Three empty rests but only 2.2 s of quiet: not over.
+        t += 4_000; assertTrue(end.offer(added = 0, atBottom = true, declaredTotal = null, collected = 5))
+        // A fresh row at the bottom resets the empty rests and the quiet alike.
+        var t2 = 0L
+        val reset = CollectEnd(now = { t2 })
         assertFalse(reset.offer(added = 0, atBottom = true, declaredTotal = null, collected = 5))
-        assertFalse(reset.offer(added = 1, atBottom = true, declaredTotal = null, collected = 6))
+        t2 += 7_000; assertFalse(reset.offer(added = 1, atBottom = true, declaredTotal = null, collected = 6))
         assertFalse(reset.offer(added = 0, atBottom = true, declaredTotal = null, collected = 6))
-        assertFalse(reset.offer(added = 0, atBottom = true, declaredTotal = null, collected = 6))
-        assertTrue(reset.offer(added = 0, atBottom = true, declaredTotal = null, collected = 6))
+        t2 += 1_100; assertFalse(reset.offer(added = 0, atBottom = true, declaredTotal = null, collected = 6))
+        t2 += 5_000; assertTrue(reset.offer(added = 0, atBottom = true, declaredTotal = null, collected = 6))
         // No declared total: the count alone never ends it — the window's size is
         // not a total, and ending there capped a long playlist at its first screen.
         val undeclared = CollectEnd()
         assertFalse(undeclared.offer(added = 3, atBottom = false, declaredTotal = null, collected = 3))
+    }
+
+    @Test fun anIncidentalCountElsewhereOnThePageCannotCapCollection() {
+        // The shape of the 84-song import that stopped at 10: the page's chrome
+        // states another list's "10 songs" ahead of the playlist's own header,
+        // and further counts trail the rows. Only the header's own count — the
+        // last one stated before the first row link — is the playlist's size.
+        val html = """
+            <html><head><title>Amazon Music: Hype</title></head><body>
+            <nav><div class="rail-card">Road Trip Mix · 10 songs</div></nav>
+            <header class="playlist-header"><h1>Hype</h1><div class="meta">84 SONGS • 4 HOURS 16 MINUTES</div></header>
+            <div class="tracklist">
+              <div class="row"><a href="/albums/B0ALBUM001?trackAsin=B0TRACK001">One</a></div>
+            </div>
+            <footer>Your other mix · 3 songs</footer>
+            </body></html>
+        """.trimIndent()
+        assertEquals(84, AmazonDom.declaredTotalOrNull(html))
+    }
+
+    @Test fun aVirtualizedListOf84RowsIsCollectedWholeAcrossWindowsGapsAndReplacement() {
+        // A modelled virtualized list: 84 rows, ~10 rendered per window, each step
+        // REPLACING the window (earlier rows unmount as later ones mount), and
+        // every chunk arriving late — the first read after a step still shows the
+        // previous window, and stepping onto the last window reads as the bottom
+        // while its rows are still loading. The collector must end with all 84
+        // and must not conclude inside a lazy gap.
+        val total = 84
+        val window = 10
+        val maxStart = total - window
+        fun rows(from: Int): List<ImportedSong> =
+            (from until minOf(from + window, total)).map { i ->
+                row("B0TRK%05d".format(i), "Song $i", "Artist ${i % 7}")
+            }
+        var clock = 0L
+        val collect = AmazonCollect()
+        val end = CollectEnd(now = { clock })
+        var held = 0
+        fun offered(added: Int, atBottom: Boolean): Boolean {
+            assertTrue("the collected set only grows", collect.songs.size >= held)
+            held = collect.songs.size
+            return end.offer(added, atBottom, total, collect.songs.size)
+        }
+        var start = 0
+        var done = offered(collect.add(rows(0)), atBottom = false)
+        assertFalse(done)
+        var guard = 0
+        while (!done && guard++ < 300) {
+            val target = minOf(start + window, maxStart)
+            // The gap read: the step was taken, the new window has not rendered —
+            // the old window reads again, and an unloaded end reads as the bottom.
+            clock += 1_100
+            done = offered(collect.add(rows(start)), atBottom = target >= maxStart)
+            assertFalse(
+                "collection concluded inside a lazy gap at ${collect.songs.size} of $total songs",
+                done && collect.songs.size < total,
+            )
+            if (done) break
+            // The chunk lands: the new window replaces the old one.
+            start = target
+            clock += 1_100
+            done = offered(collect.add(rows(start)), atBottom = start + window >= total)
+        }
+        assertTrue(done)
+        assertEquals(total, collect.songs.size)
+        assertEquals((0 until total).map { "Song $it" }, collect.songs.map { it.title })
+    }
+
+    @Test fun aShortReadStatesItsShortfallAndAWholeOneDoesNot() {
+        val short = ReadSummary.of(found = 10, declared = 84)
+        assertTrue(short.isShort)
+        assertEquals(74, short.shortBy)
+        assertFalse(ReadSummary.of(found = 84, declared = 84).isShort)
+        // No total declared: the count alone is the story, never a shortfall.
+        assertFalse(ReadSummary.of(found = 10, declared = null).isShort)
+        assertEquals(0, ReadSummary.of(found = 10, declared = null).shortBy)
+        // A page that understates itself never makes the read "short".
+        assertFalse(ReadSummary.of(found = 90, declared = 84).isShort)
     }
 
     @Test fun aPageDeclaresItsTotalOnlyWhenItStatesOne() {

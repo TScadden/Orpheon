@@ -302,6 +302,25 @@ class CatalogTest {
         assertEquals("b2", hits[1].track.album!!.images.single().url)
     }
 
+    @Test fun deezerGenresAndGenreChart() = runBlocking {
+        val f = Scripted(mapOf(
+            "/genre" to Response(200, """{"data":[{"id":0,"name":"All"},{"id":132,"name":"Pop"},{"id":116,"name":"Rap/Hip Hop"},{"id":466,"name":"Folk"},{"id":null,"name":"Broken"},{"id":9,"name":""}]}"""),
+            "/chart/466/tracks?limit=1" to Response(200, """{"total":1,"data":[
+              {"id":21,"title":"Folk One","duration":150,"explicit_lyrics":false,"artist":{"id":7,"name":"Band"},"album":{"id":9,"title":"Album","cover_big":"b1"}}]}"""),
+        ))
+        val d = Deezer(f)
+        // The listing as Deezer names it; a row with no id or no name is not a genre.
+        assertEquals(
+            listOf(Deezer.Genre(0, "All"), Deezer.Genre(132, "Pop"), Deezer.Genre(116, "Rap/Hip Hop"), Deezer.Genre(466, "Folk")),
+            d.genres(),
+        )
+        val hits = d.chartTracks(466, 1)
+        assertEquals(listOf("Folk One"), hits.map { it.track.name })
+        assertEquals("deezer:track:21", hits[0].track.uri)
+        // A stated non-explicit flag is a stated judgement: CLEAN, not UNKNOWN.
+        assertEquals(app.myspoti.api.Explicitness.CLEAN, hits[0].track.explicitness)
+    }
+
     @Test fun itunesSongsAlbumsAndItsMissingCount() = runBlocking {
         val f = Scripted(mapOf(
             "/search?term=song" to Response(200, """{"resultCount":2,"results":[

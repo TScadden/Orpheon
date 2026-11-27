@@ -20,8 +20,11 @@ import java.util.UUID
  *
  * A song whose source is not Spotify (an Amazon Music link, a playlist file) has no
  * Spotify track id: [spotifyTrackId] is "" and the row is identified by its own key and,
- * where the source stated one, its [asin]. Such rows play by their title and artist
- * (and their ISRC once one is attached), never by a Spotify id.
+ * where the source stated one, its [asin]. Such a row plays under the catalog identity
+ * the import's completion attached to it ([catalogKey]) — the audio-source extensions
+ * are only ever asked for a song by an id (a Spotify id, or a catalog key like
+ * "deezer.3135556"), so a row carrying neither cannot be played at all, however clean
+ * its title and artist read. It never plays by a Spotify id it does not have.
  */
 data class ImportedSong(
     val key: String,
@@ -43,11 +46,28 @@ data class ImportedSong(
      * the catalog completion can add it): UNKNOWN when nothing states it — playlists
      * stored before it was kept read as UNKNOWN, and UNKNOWN is never badged or hidden. */
     val explicit: app.myspoti.api.Explicitness = app.myspoti.api.Explicitness.UNKNOWN,
+    /** The song's identity in the app's own catalog ("deezer.3135556" — the key
+     * [com.music.spotui.data.catalog.CatalogRuntime.keyOf] makes of a catalog track),
+     * attached by the catalog completion under its strict bar when the row's own
+     * source gave it no Spotify id. It is the identity the row plays under (see
+     * [playId]): a row of a catalog song in a search plays under exactly such a key.
+     * "" when no completion has matched the row — playlists stored before it was
+     * kept read as "". */
+    val catalogKey: String = "",
 ) {
 
     /** How this song is told apart inside one playlist: its Spotify id, else its ASIN,
      * else nothing — a song with neither cannot be told apart from another. */
     val identity: String get() = spotifyTrackId.ifBlank { asin }
+
+    /**
+     * The id this song is played under: its Spotify id when it has one, else the
+     * catalog key its completion attached. Blank: the row carries no identity any
+     * source can be asked by, so it cannot play — the extensions' audio hook is
+     * addressed by id alone (ExtensionAudio.playList refuses a blank one outright,
+     * which is where an Amazon row with a clean title and no identity used to die).
+     */
+    val playId: String get() = spotifyTrackId.ifBlank { catalogKey }
 }
 
 /** A playlist brought in from a public link (see PlaylistImport), kept on this phone only. */
@@ -256,6 +276,46 @@ object ImportedPlaylists {
         return repaired
     }
 
+    /**
+     * Completes a stored playlist's songs from a catalog completion pass,
+     * [completedByKey] (row key → the pass's row of it): the ISRC, the cover, the
+     * album name, the explicitness and the catalog key are filled wherever the
+     * stored song lacks them — a field the stored song already carries is never
+     * overwritten, a song the pass does not know is left as it is, and the list
+     * itself never changes. [repair]'s sibling for the playlists that repair
+     * cannot reach: a Spotify repair re-reads by Spotify track id, but an Amazon
+     * or file import's rows have none — they are completed from the catalog
+     * instead, matched by their own row keys, and the catalog key the pass
+     * attaches is the identity those rows play under (see [ImportedSong.playId]).
+     * Returns the row keys of the songs this pass completed in any field.
+     */
+    fun complete(id: String, completedByKey: Map<String, ImportedSong>): Set<String> {
+        val done = LinkedHashSet<String>()
+        update {
+            playlists[id]?.let { p ->
+                var changed = false
+                val items = p.items.map { s ->
+                    val fresh = completedByKey[s.key] ?: return@map s
+                    val isrc = if (s.isrc.isBlank()) fresh.isrc else s.isrc
+                    val cover = if (s.coverUrl.isBlank()) fresh.coverUrl else s.coverUrl
+                    val album = if (s.album.isBlank()) fresh.album else s.album
+                    val explicit = if (s.explicit == app.myspoti.api.Explicitness.UNKNOWN) fresh.explicit else s.explicit
+                    val catalogKey = if (s.catalogKey.isBlank()) fresh.catalogKey else s.catalogKey
+                    if (isrc == s.isrc && cover == s.coverUrl && album == s.album &&
+                        explicit == s.explicit && catalogKey == s.catalogKey
+                    ) s
+                    else {
+                        changed = true
+                        done += s.key
+                        s.copy(isrc = isrc, coverUrl = cover, album = album, explicit = explicit, catalogKey = catalogKey)
+                    }
+                }
+                if (changed) playlists[id] = p.copy(items = items)
+            }
+        }
+        return done
+    }
+
     private fun update(change: () -> Unit) {
         synchronized(lock) {
             ensureLoaded()
@@ -271,14 +331,16 @@ object ImportedPlaylists {
 
     private fun songJson(s: ImportedSong) = JSONObject().put("key", s.key).put("track", s.spotifyTrackId)
         .put("title", s.title).put("artist", s.artist).put("album", s.album).put("duration", s.durationMs).put("cover", s.coverUrl)
-        .put("isrc", s.isrc).put("asin", s.asin).put("explicit", s.explicit.name)
+        .put("isrc", s.isrc).put("asin", s.asin).put("explicit", s.explicit.name).put("catalog", s.catalogKey)
 
     private fun songOf(o: JSONObject) = ImportedSong(o.getString("key"), o.getString("track"), o.optString("title"),
         o.optString("artist"), o.optString("album"), o.optLong("duration"), o.optString("cover"), o.optString("isrc"),
         o.optString("asin"),
         // Absent in files written before it was kept: unjudged, never a guess.
         runCatching { app.myspoti.api.Explicitness.valueOf(o.optString("explicit")) }
-            .getOrDefault(app.myspoti.api.Explicitness.UNKNOWN))
+            .getOrDefault(app.myspoti.api.Explicitness.UNKNOWN),
+        // Absent in files written before it was kept: no catalog identity yet.
+        o.optString("catalog"))
 
     internal fun write(): String {
         val lists = JSONArray()

@@ -43,6 +43,7 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.outlined.PlaylistPlay
 import androidx.compose.material.icons.automirrored.outlined.QueueMusic
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
@@ -270,6 +271,12 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
                     )
                     Text(stringResource(R.string.import_count, got.songs.size, got.total), color = AppMuted, fontSize = 13.sp,
                         modifier = Modifier.padding(top = 10.dp))
+                    // A read that gathered fewer songs than its source declares says
+                    // so plainly: a partial import is never dressed as a complete one.
+                    if (got.total > got.songs.size) {
+                        Text(stringResource(R.string.import_shortfall, got.songs.size, got.total), color = AppMuted, fontSize = 13.sp,
+                            modifier = Modifier.padding(top = 6.dp))
+                    }
                 }
                 if (busy) Text(stringResource(R.string.loading_playlists), color = AppMuted, fontSize = 13.sp,
                     modifier = Modifier.padding(top = 10.dp))
@@ -480,6 +487,7 @@ fun LibraryCreateSheet(navController: NavController, onDismiss: () -> Unit, onLi
         }
         "blend" -> BlendSheet(navController, onDismiss)
         "import" -> ImportPlaylistDialog(navController, onDismiss)
+        "djmix" -> DjMixDialog(navController, onDismiss)
         else -> com.music.spotui.ui.components.LookSheet(onDismissRequest = onDismiss, containerColor = SheetColor) {
             Column(Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
                 SheetRow(Icons.AutoMirrored.Filled.PlaylistAdd, stringResource(R.string.lbl_playlist)) { asking = "playlist" }
@@ -487,6 +495,7 @@ fun LibraryCreateSheet(navController: NavController, onDismiss: () -> Unit, onLi
                 SheetRow(Icons.Outlined.CreateNewFolder, stringResource(R.string.lbl_folder)) { asking = "folder" }
                 SheetRow(Icons.Outlined.PhoneAndroid, stringResource(R.string.local_playlist_new), stringResource(R.string.local_add_note)) { asking = "local" }
                 SheetRow(Icons.Outlined.Link, stringResource(R.string.import_playlist), stringResource(R.string.import_playlist_detail)) { asking = "import" }
+                SheetRow(Icons.Rounded.GraphicEq, stringResource(R.string.djmix_title), stringResource(R.string.djmix_detail)) { asking = "djmix" }
                 SheetRow(Icons.Outlined.FolderOpen, stringResource(R.string.share_import_file), stringResource(R.string.share_import_file_detail)) {
                     if (com.music.spotui.share.ShareImport.supported) {
                         pickShareFile.launch(arrayOf(com.music.spotui.share.ShareZip.MIME, "application/zip", "application/x-zip-compressed"))

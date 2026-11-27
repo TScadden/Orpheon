@@ -1024,20 +1024,27 @@ class Api constructor(
 
     /**
      * An imported song as a row: built exactly like [songOf] builds a Spotify track, with
-     * the row's own key kept. A song with no Spotify id (an Amazon or file import) keys
-     * its model id on its own row key instead — every such row would otherwise share the
-     * one id of "track:" — and its play query is the plain title-and-artist text
-     * [SongPlayer.buildSpotifyPlayQuery] makes of a blank id, so it plays through the
-     * extensions like any catalog song, never by a Spotify id it does not have.
+     * the row's own key kept. The model goes by the row's play id ([ImportedSong.playId]):
+     * its Spotify id, or — for an Amazon or file import — the catalog key its completion
+     * attached, exactly the key [songOf] puts on a catalog song's model. That key is what
+     * makes the row play: the tap path asks the audio-source extensions by the model's
+     * spotifyTrackId alone (ExtensionAudio.playList refuses a blank one before any
+     * extension is asked, and the refusal surfaces as "No source plays"), so a row
+     * modelled with a blank id died on tap however clean its title read — the v27
+     * completion filled ISRCs and covers but attached no identity, and its rows still
+     * could not play. A song with neither id keys its model id on its own row key
+     * instead — every such row would otherwise share the one id of "track:" — and its
+     * play query is the plain title-and-artist text [SongPlayer.buildSpotifyPlayQuery]
+     * makes of a blank id, until a completion pass gives it a key.
      */
     private fun importedSongOf(s: ImportedSong): SongsModel = SongsModel(
-        id = stableId("track:" + s.spotifyTrackId.ifBlank { "row:${s.key}" }),
+        id = stableId("track:" + s.playId.ifBlank { "row:${s.key}" }),
         title = s.title.take(128),
         album = s.album,
         singer = s.artist,
         coverUri = s.coverUrl,
-        url = SongPlayer.buildSpotifyPlayQuery(s.spotifyTrackId, s.title, s.artist),
-        spotifyTrackId = s.spotifyTrackId,
+        url = SongPlayer.buildSpotifyPlayQuery(s.playId, s.title, s.artist),
+        spotifyTrackId = s.playId,
         durationMs = s.durationMs.toInt(),
         rowUid = s.key,
         isrc = s.isrc,
@@ -1054,6 +1061,7 @@ class Api constructor(
         val p = ImportedPlaylists.get(id)
         if (p == null) { emit(Response.Error(context.getString(R.string.imported_playlist_gone))); return@flow }
         maybeRepairImported(p)
+        maybeCompleteImported(p)
         emit(Response.Success(ContextPageModel(
             uri = "scadify:imported:$id",
             type = "imported",
@@ -1100,6 +1108,28 @@ class Api constructor(
                     repaired.forEach { com.music.spotui.data.offline.OfflineDownloader.forgetFailed(it) }
                 }
             }.onFailure { if (it !is CancellationException) Log.w("Api", "Imported playlist repair for ${p.name}: $it") }
+        }
+    }
+
+    /**
+     * The completion counterpart of [maybeRepairImported] for the playlists that
+     * repair cannot reach: an Amazon or file import's rows carry no Spotify track
+     * id, so no re-read of a source link can fill them — but the catalog completion
+     * can, matched by row key ([ImportedPlaylists.complete]), and the catalog key
+     * it attaches is the identity those rows play under. A playlist stored before
+     * completion attached keys (or whose rows a pass left thin) is completed once
+     * per run when it is opened, in the background, off the page's own path; a
+     * failed pass leaves everything exactly as it is.
+     */
+    private fun maybeCompleteImported(p: ImportedPlaylist) {
+        if (p.items.none { CatalogCompletion.thin(it) }) return
+        if (!importRepairAttempted.add(p.id)) return
+        importRepairScope.launch {
+            runCatching {
+                val completed = CatalogCompletion.completeFromCatalog(p.items)
+                val byKey = completed.associateBy { it.key }
+                if (byKey.isNotEmpty()) ImportedPlaylists.complete(p.id, byKey)
+            }.onFailure { if (it !is CancellationException) Log.w("Api", "Imported playlist completion for ${p.name}: $it") }
         }
     }
 
