@@ -16,7 +16,7 @@ import org.junit.Test
 class ImportedPlaylistsOriginTest {
 
     private val amazonUrl = "https://music.amazon.com/user-playlists/B0PLAAAA1111"
-    private val spotifyUrl = "https://open.spotify.com/playlist/abc123XYZ"
+    private val spotifyUrl = "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
 
     private fun song(title: String, asin: String) =
         ImportedSong("", "", title, "Artist", "Album", 100_000L, "", asin = asin)

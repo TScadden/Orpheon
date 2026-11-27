@@ -207,7 +207,8 @@ class AmazonPlaylistReaderTest {
         val done = CatalogCompletion.complete(listOf(row), gather).single()
         assertEquals("Too Much", done.title)
         assertEquals("USRC12345678", done.isrc)
-        assertEquals("https://img/too-much", done.coverUrl)
+        // The cover the page itself showed stands: completion fills blanks only.
+        assertEquals("https://m.media-amazon.com/images/I/51too.jpg", done.coverUrl)
     }
 
     @Test fun collectionEndsAtTheDeclaredTotalOrTheTrueBottomNeverTheWindow() {
