@@ -220,6 +220,30 @@ class CatalogCompletionTest {
         assertEquals("deezer.333", out.playId)
     }
 
+    @Test fun aCommaTripleCreditCompletesOnItsPrimaryArtist() = runBlocking {
+        // Tyson's "TOO MUCH" row (Nov 27, on v30): the same song PLAYS from
+        // Search — the catalog row carries the catalog's own duration
+        // natively — but refused from the imported Hype Playlist, because
+        // completion never landed for its comma-triple credit and the
+        // duration was never attached (the hook refuses duration-less tracks
+        // before it searches). The head of the triple is the identity.
+        assertEquals("The Kid LAROI", CatalogCompletion.primaryCredit("The Kid LAROI, Jung Kook & Central Cee"))
+        val row = ImportedSong("k", "", "TOO MUCH", "The Kid LAROI, Jung Kook & Central Cee", "", 0L, "")
+        val hit = CatalogCompletion.Candidate(
+            title = "TOO MUCH", artists = listOf("The Kid LAROI", "Jung Kook", "Central Cee"),
+            album = "THE FIRST TIME", coverUrl = "https://img/toomuch.jpg", durationMs = 143_000L,
+            isrc = "USRC12300003", catalogKey = "deezer.444",
+        )
+        assertTrue(CatalogCompletion.accepted(row, hit))
+        val out = CatalogCompletion.complete(listOf(row), CatalogCompletion.Gatherer { listOf(hit) }).single()
+        assertEquals(143_000L, out.durationMs)
+        assertEquals("USRC12300003", out.isrc)
+        assertEquals("deezer.444", out.playId)
+        // The same hit credited as one combined string completes it too.
+        val combined = hit.copy(artists = listOf("The Kid LAROI, Jung Kook & Central Cee"))
+        assertTrue(CatalogCompletion.accepted(row, combined))
+    }
+
     @Test fun aDifferentPrimaryArtistStillRefuses() {
         // The guest alone is not the head: a hit credited only to the featured
         // artist is another recording of the title, however close the rest —
