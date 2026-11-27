@@ -376,16 +376,28 @@ object AmazonDom {
     private fun declaredTotal(html: String, fallback: Int): Int =
         declaredTotalOrNull(html) ?: fallback
 
+    /** The first row link of the page: an address carrying a track ASIN. */
+    private val TRACK_LINK = Regex("""href\s*=\s*"[^"]*trackAsin=""", RegexOption.IGNORE_CASE)
+
     /**
      * How many songs the page itself declares, when it declares any: the header's
-     * "N songs". Null when the page states none — a reader must not mistake the
-     * rows it happened to see for the playlist's size: a virtualized list shows
-     * a window, and the window's size is not a total (ending collection there
+     * "N songs" — the LAST count stated before the first row link, because the
+     * playlist's own header is the count-bearing block closest above its rows.
+     * A count found anywhere else is not this playlist's size: the page's chrome
+     * carries other playlists' counts (a rail card's "10 songs"), and taking the
+     * first count on the page capped a long playlist at an incidental 10 —
+     * collection ended the moment 10 were held, its real header unread. Null
+     * when the header states none — a reader must not mistake the rows it
+     * happened to see for the playlist's size: a virtualized list shows a
+     * window, and the window's size is not a total (ending collection there
      * is how a long playlist imports as its first screenful).
      */
-    internal fun declaredTotalOrNull(html: String): Int? =
-        SONG_COUNT.find(html.take(30_000))?.groupValues?.get(1)?.replace(",", "")?.toIntOrNull()
-            ?.takeIf { it > 0 }
+    internal fun declaredTotalOrNull(html: String): Int? {
+        val rowsAt = TRACK_LINK.find(html)?.range?.first
+        val header = if (rowsAt != null) html.substring(0, rowsAt) else html.take(30_000)
+        return SONG_COUNT.findAll(header).lastOrNull()?.groupValues?.get(1)
+            ?.replace(",", "")?.toIntOrNull()?.takeIf { it > 0 }
+    }
 
     private fun name(html: String): String {
         val meta = META_TAG.find(html)?.value?.let { CONTENT.find(it)?.groupValues?.get(1) }
@@ -460,13 +472,23 @@ class AmazonCollect {
  * When a scroll collection is over, as a decision of its own so it is testable
  * without a phone: the page's declared total is reached, or the list's true
  * bottom has repeated with no new rows across [bottomStallsToEnd] stepped
- * passes running. A total the page never declared (null) can only be ended by
- * the bottom rule — the size of the window a virtualized list happens to show
- * is not a total, and treating it as one is how a long playlist imports as
- * its first screenful.
+ * passes running AND a full [bottomQuietMs] of no growth at the bottom. The
+ * time half matters as much as the count: a virtualized player loads its next
+ * chunk asynchronously, so an apparent bottom can sit empty for several
+ * passes while more rows are on their way — ending on the pass count alone
+ * concluded collections inside that lazy-load gap. A total the page never
+ * declared (null) can only be ended by the bottom rule — the size of the
+ * window a virtualized list happens to show is not a total, and treating it
+ * as one is how a long playlist imports as its first screenful. [now] is a
+ * seam: tests drive the clock.
  */
-internal class CollectEnd(private val bottomStallsToEnd: Int = 3) {
+internal class CollectEnd(
+    private val bottomStallsToEnd: Int = 3,
+    private val bottomQuietMs: Long = 6_000L,
+    private val now: () -> Long = System::currentTimeMillis,
+) {
     private var stalls = 0
+    private var quietSince: Long? = null
 
     /**
      * Offers one collection pass: [added] rows were new, the list rested
@@ -476,9 +498,32 @@ internal class CollectEnd(private val bottomStallsToEnd: Int = 3) {
     fun offer(added: Int, atBottom: Boolean, declaredTotal: Int?, collected: Int): Boolean {
         if (declaredTotal != null && declaredTotal > 0 && collected >= declaredTotal) return true
         if (atBottom && added == 0) {
-            if (++stalls >= bottomStallsToEnd) return true
-        } else stalls = 0
+            stalls++
+            val since = quietSince ?: now().also { quietSince = it }
+            if (stalls >= bottomStallsToEnd && now() - since >= bottomQuietMs) return true
+        } else {
+            stalls = 0
+            quietSince = null
+        }
         return false
+    }
+}
+
+/**
+ * How a finished read is stated, as a value of its own so the mapping is
+ * testable without a phone: the songs the read holds, and how many the page
+ * declared ([declared] null when it stated none — the count alone is the
+ * whole story then). A read that ends short of its declared total says so
+ * through [shortBy] instead of presenting a partial import as complete.
+ */
+internal data class ReadSummary(val found: Int, val declared: Int?) {
+    /** Songs the page declared that the read never gathered; 0 when whole or undeclared. */
+    val shortBy: Int get() = if (declared == null) 0 else (declared - found).coerceAtLeast(0)
+    val isShort: Boolean get() = shortBy > 0
+
+    companion object {
+        fun of(found: Int, declared: Int?): ReadSummary =
+            ReadSummary(found, declared?.takeIf { it > 0 })
     }
 }
 
@@ -677,8 +722,16 @@ class AmazonReadSession(context: Context, val url: String) {
             passes++
             done = end.offer(added, step?.atBottom ?: false, declared, collect.songs.size)
         }
+        // The read's own statement of itself: whole, or short by a number the
+        // confirm step shows plainly (the Imported total carries the declared
+        // count, so "10 of 84 songs read" — and the shortfall line — say what
+        // a partial read is instead of dressing it as complete).
+        val summary = ReadSummary.of(collect.songs.size, declared)
+        if (summary.isShort) {
+            lastPoll = "collect ended short: ${summary.found} of ${summary.declared} songs read"
+        }
         imported = PlaylistImport.Imported(
-            first.name, collect.songs, maxOf(declared ?: 0, collect.songs.size),
+            first.name, collect.songs, maxOf(summary.declared ?: 0, summary.found),
         )
         stage = AmazonStage.DONE
         phase = Phase.DONE
@@ -804,26 +857,63 @@ class AmazonReadSession(context: Context, val url: String) {
          * Steps the page's list down by one screen — never a jump to the bottom:
          * a virtualized list renders only what it rests on, so a jump renders
          * the end and skips the middle — and reports where it came to rest as
-         * JSON: {"top":…,"height":…,"client":…} of the scroller that moved, the
-         * largest scrollable element, else the page itself.
+         * JSON: {"top":…,"height":…,"client":…} of the scroller that moved.
+         *
+         * The scroller stepped is the one that actually holds the rows: the
+         * walk starts from a row's own track link and climbs to its nearest
+         * scrollable ancestor, crossing shadow boundaries through their hosts
+         * — the player renders its list inside shadow roots (the serializer
+         * inlines them for reading), and a stepper that only queries the light
+         * DOM never sees that container at all: it stepped the document, the
+         * rows never moved, every pass read as the bottom, and collection
+         * ended with the first window. Fallbacks, in order: the largest
+         * scrollable element of the deep walk, then the page itself.
          */
         const val STEP_JS = """
             (function(){
-              var doc = document.documentElement;
-              var best = null, bestH = doc.scrollHeight || 0;
-              var els = document.querySelectorAll('*');
-              for (var i = 0; i < els.length; i++) {
-                var e = els[i];
-                if (e.scrollHeight > e.clientHeight + 40 && e.scrollHeight > bestH) { best = e; bestH = e.scrollHeight; }
+              function deepAll(root, out){
+                var els = root.querySelectorAll ? root.querySelectorAll('*') : [];
+                for (var i = 0; i < els.length; i++) {
+                  var e = els[i];
+                  out.push(e);
+                  if (e.shadowRoot) deepAll(e.shadowRoot, out);
+                }
+                return out;
               }
-              var target = best || doc;
+              function scrollable(e){ return e.scrollHeight > e.clientHeight + 40; }
+              function nearestScroller(node){
+                var n = node;
+                while (n) {
+                  if (n.nodeType === 1 && scrollable(n)) return n;
+                  if (n.parentElement) { n = n.parentElement; continue; }
+                  var r = n.getRootNode ? n.getRootNode() : null;
+                  n = (r && r.host) ? r.host : null;
+                }
+                return null;
+              }
+              var doc = document.documentElement;
+              var all = deepAll(document, []);
+              var anchor = null;
+              for (var i = 0; i < all.length; i++) {
+                var h = all[i].getAttribute ? all[i].getAttribute('href') : null;
+                if (h && h.indexOf('trackAsin=') >= 0) { anchor = all[i]; break; }
+              }
+              var target = anchor ? nearestScroller(anchor) : null;
+              if (!target) {
+                var bestH = 0;
+                for (var j = 0; j < all.length; j++) {
+                  var e2 = all[j];
+                  if (scrollable(e2) && e2.scrollHeight > bestH) { bestH = e2.scrollHeight; target = e2; }
+                }
+              }
+              if (!target) target = doc;
               var view = target.clientHeight || window.innerHeight || 600;
               var step = Math.max(200, Math.floor(view * 0.9));
               target.scrollTop = Math.min((target.scrollTop || 0) + step, target.scrollHeight || 0);
-              if (!best) window.scrollTo(0, Math.min((window.scrollY || 0) + step, doc.scrollHeight || 0));
-              var top = best ? best.scrollTop : (window.scrollY || doc.scrollTop || 0);
-              var height = best ? best.scrollHeight : (doc.scrollHeight || 0);
-              var client = best ? best.clientHeight : (window.innerHeight || 0);
+              if (target === doc) window.scrollTo(0, Math.min((window.scrollY || 0) + step, doc.scrollHeight || 0));
+              var top = target === doc ? (window.scrollY || doc.scrollTop || 0) : (target.scrollTop || 0);
+              var height = target.scrollHeight || 0;
+              var client = target.clientHeight || window.innerHeight || 0;
               return JSON.stringify({top: Math.round(top), height: Math.round(height), client: Math.round(client)});
             })()
         """

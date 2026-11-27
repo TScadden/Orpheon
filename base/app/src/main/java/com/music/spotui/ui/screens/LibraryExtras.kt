@@ -271,6 +271,12 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
                     )
                     Text(stringResource(R.string.import_count, got.songs.size, got.total), color = AppMuted, fontSize = 13.sp,
                         modifier = Modifier.padding(top = 10.dp))
+                    // A read that gathered fewer songs than its source declares says
+                    // so plainly: a partial import is never dressed as a complete one.
+                    if (got.total > got.songs.size) {
+                        Text(stringResource(R.string.import_shortfall, got.songs.size, got.total), color = AppMuted, fontSize = 13.sp,
+                            modifier = Modifier.padding(top = 6.dp))
+                    }
                 }
                 if (busy) Text(stringResource(R.string.loading_playlists), color = AppMuted, fontSize = 13.sp,
                     modifier = Modifier.padding(top = 10.dp))
