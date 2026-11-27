@@ -83,6 +83,15 @@ object LocalPlaylists {
         }
     }
 
+    /**
+     * Blocks until the store's file has been read ([init] starts the read on its own
+     * thread; a reader that cannot wait for the state to land — the watch's answers in a
+     * cold process — calls this after init). The read is the lock's own work, so a caller
+     * that arrives while it runs waits for that same read, never a second one. Call off
+     * the main thread.
+     */
+    fun awaitLoaded() = ensureLoaded()
+
     /** Newest first. */
     fun list(): List<LocalPlaylist> = playlists.values.sortedByDescending { it.createdAt }
 

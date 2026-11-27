@@ -37,7 +37,13 @@ object ExtStreamCache {
         override fun createDataSource(): DataSource = Routing(plain.createDataSource()) { viaCache.createDataSource() }
     }
 
-    /** Opens [cachedSource] for an extension's song, [plain] for the rest. */
+    /**
+     * Opens [cachedSource] for an extension's song, [plain] for the rest. An HLS answer's
+     * song goes [plain] too (v33): only its playlist crosses the extension's address, and
+     * the cache would keep that playlist as the song's bytes — its segment addresses are
+     * signed and expire, so the next play would be served a dead playlist and never ask
+     * again. The segments themselves are read at their own addresses, as any other page.
+     */
     private class Routing(private val plain: DataSource, private val cachedSource: () -> DataSource) : DataSource {
         private var cache: DataSource? = null
         private var active: DataSource = plain
@@ -50,7 +56,7 @@ object ExtStreamCache {
         }
 
         override fun open(dataSpec: DataSpec): Long {
-            active = if (dataSpec.uri.scheme == ExtensionAudio.SCHEME)
+            active = if (dataSpec.uri.scheme == ExtensionAudio.SCHEME && !ExtensionAudio.keptIsHls(dataSpec.uri))
                 (cache ?: cachedSource().also { c -> listeners.forEach(c::addTransferListener); cache = c })
             else plain
             return active.open(dataSpec)

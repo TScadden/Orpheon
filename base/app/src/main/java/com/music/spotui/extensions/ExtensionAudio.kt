@@ -1,6 +1,7 @@
 package com.music.spotui.extensions
 
 import android.net.Uri
+import androidx.media3.common.MimeTypes
 import app.myspoti.extensions.AudioStream
 import app.myspoti.extensions.TrackInfo
 import com.music.spotui.data.entity.SongsModel
@@ -240,6 +241,37 @@ object ExtensionAudio {
     fun deliveryOf(trackId: String): String? =
         known[trackId]?.stream?.let { if (it.manifest != null) "dash" else "url ${it.mimeType ?: "untyped"}" }
 
+    /** The spellings of an HLS playlist's media type an answer may announce. */
+    private val HLS_MIME_TYPES = setOf(
+        "application/x-mpegurl", "application/vnd.apple.mpegurl", "application/mpegurl",
+        "audio/x-mpegurl", "audio/mpegurl",
+    )
+
+    /**
+     * The media type the player must be told for [stream]'s song: an HLS playlist's, when the
+     * answer announces one — by its media type, or by an address ending in .m3u8. The player's
+     * source factory chooses by the item's type, and the `myspoti-ext:` address itself says
+     * nothing, so an untyped HLS answer was read as a plain file and the extractors broke on
+     * the playlist text (the song "unavailable": every SoundCloud answer, v33). Null for the
+     * rest, exactly as items were built before: a DASH answer is read by the data source as
+     * one file whatever it announces, and a file answer is typed by its own bytes.
+     */
+    internal fun itemMimeType(stream: AudioStream): String? = when {
+        stream.manifest != null -> null
+        stream.mimeType?.lowercase()?.let { it in HLS_MIME_TYPES } == true -> MimeTypes.APPLICATION_M3U8
+        stream.url.substringBefore('?').substringBefore('#').endsWith(".m3u8", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
+        else -> null
+    }
+
+    /**
+     * Whether the answer kept for the song of [uri] is an HLS playlist (see [itemMimeType]):
+     * its playlist must not be read through the media cache, which would keep the playlist
+     * itself as the song's bytes and serve its segment addresses — signed, soon expired —
+     * again on the next play (see ExtStreamCache).
+     */
+    fun keptIsHls(uri: Uri): Boolean =
+        known[uri.lastPathSegment.orEmpty()]?.stream?.let { itemMimeType(it) } != null
+
     /**
      * For the player's data source: the audio of a `myspoti-ext:` item, or null. Blocks.
      * [again]: the answer kept is dropped and the extensions are asked anew (its address was refused).
@@ -389,6 +421,10 @@ object ExtensionAudio {
             album = s.album, durationMs = s.durationMs.toLong(), artUri = Uri.parse(s.coverUri),
             speech = com.music.spotui.data.offline.episodeKeyOf(s) != null || s.url.startsWith("spotify:episode:"),
             explicit = s.knownExplicit,
+            // An answer already kept for the song (the picked one is asked first, a page's
+            // first songs are warmed) types its item now; the rest are retyped by the
+            // player's read-ahead when their answer lands (LocalPlayer.prefetchNext).
+            mimeType = known[s.spotifyTrackId]?.takeIf { it.fresh }?.stream?.let(::itemMimeType),
         )
 
     /**

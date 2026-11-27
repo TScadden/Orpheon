@@ -344,18 +344,36 @@ object LocalPlayer {
             runCatching {
                 val s = com.music.spotui.extensions.ExtensionAudio.resolve(uri, ahead = true) ?: return@launch
                 val cheap = !com.music.spotui.data.DataSaver.metered
+                // An HLS answer (v33): nothing of it is read ahead or cached — only its
+                // playlist crosses the extension's address, and its segments are the
+                // player's to ask for as it plays (see ExtStreamCache on the playlist).
+                val hls = com.music.spotui.extensions.ExtensionAudio.itemMimeType(s) != null
                 if (s.manifest != null) {
                     val live = com.music.spotui.data.offline.DashLive.open(s.manifest!!, s.headers, com.music.spotui.data.offline.OfflineDownloader.DownloadUa)
                     if (cheap && isActive) live.warm()
-                } else if (cheap && isActive) {
+                } else if (!hls && cheap && isActive) {
                     com.music.spotui.data.offline.StreamHead.fetch(uri.lastPathSegment.orEmpty(), s.url, s.headers,
                         System.currentTimeMillis() + s.keepMs(HEAD_KEEP_MS)) { isActive }
                 }
                 // The whole next song (or its start, a long one) into the cache: it plays on if
                 // the network drops meanwhile, airplane mode included (reported: the song after
                 // skipped a few seconds into a flight).
-                if (cheap && isActive && !com.music.spotui.data.DataSaver.active)
+                if (!hls && cheap && isActive && !com.music.spotui.data.DataSaver.active)
                     com.music.spotui.data.offline.ExtStreamCache.cacheAhead(Graph.app, uri) { isActive }
+                // The next song's item was built before its answer was known (only the picked
+                // song is asked at the tap): the answer's type goes onto its item now, while
+                // it is still next. Played as built, an HLS song would be read as a plain
+                // file and fail; a song whose answer changed kind is retyped the same way.
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (!isActive) return@withContext
+                    val t = tracks.getOrNull(i) ?: return@withContext
+                    if (t.uri != uri) return@withContext
+                    val want = com.music.spotui.extensions.ExtensionAudio.itemMimeType(s)
+                    if (t.mimeType != want) {
+                        swap(p, i, t.copy(mimeType = want))
+                        log("${t.title}: its item retyped for the answer it got (${want ?: "a plain file"})")
+                    }
+                }
             }
         }
     }
@@ -2028,7 +2046,8 @@ object LocalPlayer {
         SongPlayer.continueOnSpotify(t, spotifyId(t))
     }
 
-    private fun item(t: LocalTrack) = MediaItem.Builder().setUri(t.uri).setMediaId(t.id.toString()).setMimeType(t.mimeType)
+    /** The player's item for [t] (internal, not private: the tests build the very item the player queues). */
+    internal fun item(t: LocalTrack) = MediaItem.Builder().setUri(t.uri).setMediaId(t.id.toString()).setMimeType(t.mimeType)
         .setMediaMetadata(MediaMetadata.Builder().setTitle(t.title).setArtist(t.artist).setAlbumTitle(t.album)
             .setArtworkUri(android.net.Uri.parse(t.artUri.toString())).setDurationMs(t.durationMs.takeIf { it > 0 }).build()).build()
     /** SongPlayer.repeatMode as this player has it (0 off, 1 the queue, 2 the song for good, 3 the song once; see LocalRepeat). */

@@ -134,7 +134,7 @@ internal fun WatchPager(
                     page == 0 -> WatchPlayer(playing, error, artwork, onPrevious, onToggle, onNext, volume, active = pager.currentPage == 0)
                     mode == WatchMode.WATCH && page == 1 -> {
                         val opened = openList
-                        if (opened != null) WatchPlaylist(opened, openTracks, onCloseList, onPlayList, onPlayTrack, onRetryTracks, onShuffleList)
+                        if (opened != null) WatchPlaylist(opened, openTracks, onCloseList, onPlayList, onPlayTrack, onRetryTracks, onShuffleList, error)
                         else WatchLibrary(lists, onOpen, onRetry, extensionsNote, onSyncExtensions)
                     }
                     else -> WatchModePage(mode, onModeChange, updateAuto, onUpdateAutoChange, updateChecking, updateMessage, updateIsError, updateLastChecked, onCheckUpdates, pullsUsage, onClearPulls)
@@ -502,6 +502,7 @@ internal fun WatchPlaylist(
     onPlayTrack: (Int) -> Unit,
     onRetry: () -> Unit,
     onShuffleList: (WatchList) -> Unit = {},
+    error: String? = null,
 ) {
     val state = rememberTransformingLazyColumnState()
     val spec = rememberTransformationSpec()
@@ -530,6 +531,15 @@ internal fun WatchPlaylist(
                     onClick = { onShuffleList(list) }, colors = ButtonDefaults.filledTonalButtonColors(),
                     modifier = Modifier.fillMaxWidth().transformedHeight(this, spec), transformation = SurfaceTransformation(spec),
                 ) { Text(stringResource(R.string.wear_shuffle), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+            // A play that failed (a pull the phone never answered, a file gone) says so
+            // here, on the page the tap happened on (v33): the same words also show on
+            // the player page, which the tap never brings up.
+            if (error != null) item {
+                Text(
+                    stringResource(R.string.wear_failed, error), textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error, modifier = Modifier.fillMaxWidth(),
+                )
             }
             when {
                 tracks == null -> item {
