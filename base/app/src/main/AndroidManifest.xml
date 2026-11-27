@@ -210,6 +210,13 @@
                 <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
                 <data android:scheme="wear" android:host="*" android:pathPrefix="/orpheon" />
             </intent-filter>
+            <!-- Watch mode: the phone's own files cross to the watch through a channel of
+                 their own (/scadify/file). Without this filter the channel's opening was
+                 never delivered and every pull of an uncached file hung in silence (v33). -->
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/scadify" />
+            </intent-filter>
         </service>
     </application>
 

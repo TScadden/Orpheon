@@ -7,6 +7,7 @@ import android.util.Log
 import app.myspoti.pass.PassLink
 import com.google.android.gms.wearable.Wearable
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -143,33 +144,55 @@ class PhoneLink(private val context: Context) {
         val node = nodes.firstOrNull { it.isNearby } ?: nodes.firstOrNull()
             ?: throw PullFailed(PullFailed.Kind.UNREACHABLE)
         val client = Wearable.getChannelClient(context)
-        val channel = try {
-            client.openChannel(node.id, FILE).await()
-        } catch (e: Exception) {
+        var closer: (() -> Unit)? = null
+        try {
+            // The whole handshake is bounded (v33): a channel the phone never answers —
+            // its app asleep, the opening never delivered — left this waiting without
+            // end, and the song simply never started. The status line is read in an
+            // async of its own because a stream read does not hear cancellation: the
+            // deadline leaves it behind and closes the channel, which ends the read.
+            // A pull already crossing keeps its caller's outer guard (WatchPulls).
+            return withTimeout(HANDSHAKE_MS) {
+                val channel = try {
+                    client.openChannel(node.id, FILE).await()
+                } catch (e: Exception) {
+                    throw PullFailed(PullFailed.Kind.UNREACHABLE, e)
+                }
+                val close: () -> Unit = { runCatching { client.close(channel) } }
+                closer = close
+                registerCloser(close)
+                async(Dispatchers.IO) { readAnswer(client, channel, localUri, close) }.await()
+            }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            closer?.invoke()
             throw PullFailed(PullFailed.Kind.UNREACHABLE, e)
         }
-        val closer: () -> Unit = { runCatching { client.close(channel) } }
-        registerCloser(closer)
-        return withContext(Dispatchers.IO) {
-            try {
-                client.getOutputStream(channel).await().also { out ->
-                    out.write((localUri + "\n").toByteArray(Charsets.UTF_8))
-                    out.flush()
-                }
-                val input = client.getInputStream(channel).await()
-                val status = readStatusLine(input)
-                if (status.startsWith("ok")) {
-                    FilePull(input, status.removePrefix("ok").trim().toLongOrNull() ?: -1L, closer)
-                } else {
-                    closer()
-                    throw PullFailed(PullFailed.Kind.GONE)
-                }
-            } catch (e: PullFailed) {
-                throw e
-            } catch (e: Exception) {
-                closer()
-                throw PullFailed(PullFailed.Kind.UNREACHABLE, e)
+    }
+
+    /** The pull's first exchange, on an IO thread: the file's address out, the phone's one-line answer in. */
+    private suspend fun readAnswer(
+        client: com.google.android.gms.wearable.ChannelClient,
+        channel: com.google.android.gms.wearable.ChannelClient.Channel,
+        localUri: String,
+        closer: () -> Unit,
+    ): FilePull {
+        try {
+            client.getOutputStream(channel).await().also { out ->
+                out.write((localUri + "\n").toByteArray(Charsets.UTF_8))
+                out.flush()
             }
+            val input = client.getInputStream(channel).await()
+            val status = readStatusLine(input)
+            if (status.startsWith("ok")) {
+                return FilePull(input, status.removePrefix("ok").trim().toLongOrNull() ?: -1L, closer)
+            }
+            closer()
+            throw PullFailed(PullFailed.Kind.GONE)
+        } catch (e: PullFailed) {
+            throw e
+        } catch (e: Exception) {
+            closer()
+            throw PullFailed(PullFailed.Kind.UNREACHABLE, e)
         }
     }
 
@@ -220,6 +243,8 @@ class PhoneLink(private val context: Context) {
         private const val ASK_MS = 20_000L
         private const val FIND_MS = 5_000L
         private const val EXTENSIONS_MS = 60_000L
+        /** A file pull's handshake — the channel open and the phone's one-line answer — never waits longer. */
+        private const val HANDSHAKE_MS = 30_000L
         private val lock = Mutex()
     }
 }

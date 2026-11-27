@@ -97,6 +97,7 @@ object WatchAnswers {
             .forEach { p -> out.add(JSONObject().put("uri", p.uri).put("name", p.name).put("subtitle", p.owner.orEmpty())) }
         runCatching {
             LocalPlaylists.init(context)
+            LocalPlaylists.awaitLoaded()
             WatchLocalAnswers.libraryEntries(LocalPlaylists.list(), ImportedPlaylists.list())
         }.getOrDefault(emptyList()).forEach { out.add(it) }
         return JSONArray().apply { out.take(MAX_LISTS).forEach { put(it) } }.toString()
@@ -110,6 +111,7 @@ object WatchAnswers {
         when {
             uri.startsWith(WatchLocalAnswers.LOCAL_PREFIX) -> {
                 LocalPlaylists.init(context)
+                LocalPlaylists.awaitLoaded()
                 val p = LocalPlaylists.playlists[uri.removePrefix(WatchLocalAnswers.LOCAL_PREFIX)]
                     ?: error("no such list on this phone")
                 WatchLocalAnswers.localTracks(p).forEach(::add)
@@ -121,8 +123,14 @@ object WatchAnswers {
             }
             uri == WatchLocalAnswers.LIKED_URI -> {
                 runCatching { platformTracks(uri) }.getOrDefault(emptyList()).forEach { add(trackJson(it)) }
-                runCatching { WatchLocalAnswers.likedTracks(CatalogLikes.items.toList(), LocalLikes.items.toList()) }
-                    .getOrDefault(emptyList()).forEach(::add)
+                runCatching {
+                    // Both like stores load on their own thread after init: in a cold
+                    // process their rows are not there yet, and the watch was told the
+                    // list is shorter than it is (v33). Wait for the reads.
+                    CatalogLikes.init(context); LocalLikes.init(context)
+                    CatalogLikes.awaitLoaded(); LocalLikes.awaitLoaded()
+                    WatchLocalAnswers.likedTracks(CatalogLikes.items.toList(), LocalLikes.items.toList())
+                }.getOrDefault(emptyList()).forEach(::add)
             }
             else -> platformTracks(uri).forEach { add(trackJson(it)) }
         }
@@ -171,6 +179,12 @@ object WatchAnswers {
     fun localFile(context: Context, uri: String): Pair<java.io.InputStream, Long>? {
         if (uri.isBlank()) return null
         LocalPlaylists.init(context)
+        LocalLikes.init(context)
+        // The stores load on their own thread after init: in a cold process (the watch's
+        // pull is often what wakes this app) the exposed set read empty or partial, and a
+        // file the phone has was answered "gone" (v33). Wait for both reads.
+        LocalPlaylists.awaitLoaded()
+        LocalLikes.awaitLoaded()
         val exposed = HashSet<String>()
         LocalPlaylists.playlists.values.forEach { p -> p.items.forEach { exposed.add(it.uri) } }
         LocalLikes.items.forEach { exposed.add(it.uri) }
