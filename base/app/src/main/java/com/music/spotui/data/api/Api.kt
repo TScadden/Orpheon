@@ -1060,11 +1060,7 @@ class Api constructor(
             name = p.name,
             coverUri = if (p.cover.isNotBlank()) java.io.File(p.cover).toURI().toString()
                 else p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl.orEmpty(),
-            ownerName = context.getString(when (PlaylistLinks.parse(p.sourceUrl)) {
-                is PlaylistLink.Spotify -> R.string.imported_playlist_subtitle
-                is PlaylistLink.Amazon -> R.string.imported_playlist_subtitle_amazon
-                PlaylistLink.Unknown -> R.string.imported_playlist_subtitle_generic
-            }),
+            ownerName = context.getString(importedOriginLabelRes(importedOrigin(p))),
             metaLine = context.resources.getQuantityString(R.plurals.lbl_n_songs, p.items.size, p.items.size),
             tracks = p.items.map(::importedSongOf),
             complete = true,

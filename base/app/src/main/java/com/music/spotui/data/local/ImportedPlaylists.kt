@@ -59,6 +59,13 @@ data class ImportedPlaylist(
     val createdAt: Long,
     /** The user's own cover picture: a file in the app's covers folder, "" for the songs' own art. */
     val cover: String = "",
+    /**
+     * Where the import came by — "spotify", "amazon" or "csv" — stated by the import
+     * itself, so every surface reads the same "Imported from …" truth (the Library
+     * list once hardcoded Spotify while an Amazon import's own page said Amazon).
+     * "" in playlists stored before it was kept: those are read from [sourceUrl].
+     */
+    val origin: String = "",
 )
 
 /**
@@ -106,13 +113,25 @@ object ImportedPlaylists {
      * at most once (the store's rule, as in [LocalPlaylists]): a source list that names the
      * same track twice imports it once, first listing first; a song with no identity at its
      * source (no Spotify id, no ASIN) cannot be told apart from another, so it is always kept.
+     *
+     * Re-importing a link the phone already holds ([sourceUrl] equal, non-blank) REPLACES
+     * that playlist's songs in place — same id, same cover, same place in the list — rather
+     * than adding a second copy: re-importing is how a broken import is repaired, and a
+     * duplicate is nobody's repair. A file import (no link) always makes a new playlist.
      */
-    fun create(name: String, sourceUrl: String, songs: List<ImportedSong>): ImportedPlaylist {
+    fun create(name: String, sourceUrl: String, songs: List<ImportedSong>, origin: String = ""): ImportedPlaylist {
+        ensureLoaded()
         val seen = HashSet<String>()
         val once = songs.filter { it.identity.isBlank() || seen.add(it.identity) }
-        val p = ImportedPlaylist(
-            UUID.randomUUID().toString(), name.trim(), sourceUrl,
-            once.map { it.copy(key = UUID.randomUUID().toString()) }, System.currentTimeMillis(),
+        val rows = once.map { it.copy(key = UUID.randomUUID().toString()) }
+        val held = if (sourceUrl.isBlank()) null
+            else playlists.values.firstOrNull { it.sourceUrl == sourceUrl }
+        val p = if (held == null) ImportedPlaylist(
+            UUID.randomUUID().toString(), name.trim(), sourceUrl, rows, System.currentTimeMillis(),
+            origin = origin,
+        ) else held.copy(
+            name = name.trim().ifBlank { held.name }, items = rows,
+            origin = origin.ifBlank { held.origin },
         )
         update { playlists[p.id] = p }
         return p
@@ -265,7 +284,7 @@ object ImportedPlaylists {
         val lists = JSONArray()
         playlists.values.forEach { p ->
             lists.put(JSONObject().put("id", p.id).put("name", p.name).put("source", p.sourceUrl).put("created", p.createdAt)
-                .put("cover", p.cover)
+                .put("cover", p.cover).put("origin", p.origin)
                 .put("items", JSONArray().apply { p.items.forEach { put(songJson(it)) } }))
         }
         return JSONObject().put("version", VERSION).put("playlists", lists).toString()
@@ -279,7 +298,7 @@ object ImportedPlaylists {
             val p = lists.getJSONObject(i)
             val a = p.optJSONArray("items")
             val songs = (0 until (a?.length() ?: 0)).mapNotNull { runCatching { songOf(a!!.getJSONObject(it)) }.getOrNull() }
-            playlists[p.getString("id")] = ImportedPlaylist(p.getString("id"), p.optString("name"), p.optString("source"), songs, p.optLong("created"), p.optString("cover"))
+            playlists[p.getString("id")] = ImportedPlaylist(p.getString("id"), p.optString("name"), p.optString("source"), songs, p.optLong("created"), p.optString("cover"), p.optString("origin"))
         }
     }
 }

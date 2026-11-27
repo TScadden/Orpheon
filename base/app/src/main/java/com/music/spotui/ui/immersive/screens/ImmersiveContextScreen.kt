@@ -102,6 +102,7 @@ import com.music.spotui.data.offline.OfflineCollections
 import com.music.spotui.data.offline.OfflineStatus
 import com.music.spotui.data.offline.OfflineStore
 import com.music.spotui.di.LocalPlayer
+import com.music.spotui.di.likedRowShown
 import com.music.spotui.di.Palette
 import com.music.spotui.di.SongPlayer
 import com.music.spotui.ui.components.DownloadAsk
@@ -431,7 +432,7 @@ private fun ImmersiveContextContent(navController: NavController, vm: ContextVie
     val findable = p.type == "liked" || p.type == "playlist" || p.type == "imported"
     val all by remember(p) {
         derivedStateOf {
-            if (isLiked) p.tracks.filter { SongPlayer.library["spotify:track:${it.spotifyTrackId}"] != false } else p.tracks
+            if (isLiked) p.tracks.filter { likedRowShown(it) } else p.tracks
         }
     }
     // An own playlist in its own order: its songs can be moved by hand, a handle on each while

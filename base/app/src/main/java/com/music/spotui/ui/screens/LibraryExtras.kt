@@ -172,6 +172,8 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
     var fetched by remember { mutableStateOf<PlaylistImport.Imported?>(null) }
     /** Where [fetched] came from, kept with the playlist: the link, or "" for a file. */
     var fetchedSource by remember { mutableStateOf("") }
+    /** Which source [fetched] came by — "spotify", "amazon" or "csv" — kept with the playlist as its origin. */
+    var fetchedOrigin by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var amazon by remember { mutableStateOf<com.music.spotui.data.api.AmazonReadSession?>(null) }
     val fieldColors = TextFieldDefaults.colors(
@@ -181,13 +183,14 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
     )
     // Whatever was read, from whichever source: complete its thin rows from the app's
     // own catalog before it is shown or kept (CatalogCompletion), then offer the name.
-    fun complete(read: PlaylistImport.Imported, source: String) {
+    fun complete(read: PlaylistImport.Imported, source: String, origin: String) {
         scope.launch {
             val done = runCatching {
                 read.copy(songs = com.music.spotui.data.api.CatalogCompletion.completeFromCatalog(read.songs))
             }.getOrDefault(read)
             fetched = done
             fetchedSource = source
+            fetchedOrigin = origin
             name = done.name.ifBlank { context.getString(R.string.import_default_name) }
             busy = false
         }
@@ -208,7 +211,7 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
                 if (parsed == null) {
                     error = context.getString(R.string.import_file_bad)
                     busy = false
-                } else complete(PlaylistImport.Imported(parsed.name, parsed.songs, parsed.songs.size), "")
+                } else complete(PlaylistImport.Imported(parsed.name, parsed.songs, parsed.songs.size), "", "csv")
             }
         }
     }
@@ -220,7 +223,7 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
                     // A reading Spotify's API refused part of arrives thin (no
                     // covers, albums or ISRCs): complete() fills it from the catalog.
                     runCatching { PlaylistImport.fetchSpotify(parsed.id) }
-                        .onSuccess { complete(it, link.trim()) }
+                        .onSuccess { complete(it, link.trim(), "spotify") }
                         .onFailure { error = context.getString(R.string.import_failed); busy = false }
                 }
             }
@@ -234,7 +237,7 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
     amazon?.let { session ->
         AmazonImportDialog(
             session = session,
-            onImported = { imported -> amazon = null; complete(imported, session.url) },
+            onImported = { imported -> amazon = null; complete(imported, session.url, "amazon") },
             // No error text here: the Amazon dialog itself showed the read's failure
             // readout (what the page actually was) before it was closed.
             onFailed = { amazon = null; busy = false },
@@ -278,7 +281,7 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
             if (got == null) TextButton(enabled = link.isNotBlank() && !busy, onClick = { fetch() }) {
                 Text(stringResource(R.string.import_fetch), color = Green)
             } else TextButton(enabled = name.isNotBlank(), onClick = {
-                val p = ImportedPlaylists.create(name, fetchedSource, got.songs)
+                val p = ImportedPlaylists.create(name, fetchedSource, got.songs, fetchedOrigin)
                 onDismiss()
                 navController.navigate(importedPlaylistRoute(p.id))
             }) { Text(stringResource(R.string.import_button), color = Green) }
@@ -1064,7 +1067,9 @@ private fun AddLocalToPlaylistSheet(tracks: List<LocalTrack>, single: Boolean, o
             // import's rows.
             items(com.music.spotui.data.local.ImportedPlaylists.list(), key = { "i:" + it.id }) { p ->
                 PickRow(
-                    name = p.name, detail = stringResource(R.string.imported_playlist_subtitle_generic),
+                    name = p.name, detail = stringResource(
+                        com.music.spotui.data.api.importedOriginLabelRes(com.music.spotui.data.api.importedOrigin(p)),
+                    ),
                     cover = p.cover.takeIf { it.isNotBlank() }?.let { java.io.File(it) }
                         ?: p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl,
                 ) {

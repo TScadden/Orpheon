@@ -2309,11 +2309,17 @@ object SongPlayer {
 
     private suspend fun checkLibrary(uris: List<String>): LibraryCheck {
         if (uris.isEmpty()) return LibraryCheck(emptySet(), emptySet(), false)
+        // The bare track prefix asks about no track at all — a row with no Spotify id
+        // builds it — so it never goes to the platform and its answer is never
+        // recorded: a false written under it would be read as every id-less row's
+        // saved state (it once emptied the Liked Songs list of its local files).
+        val asked = uris.filter { it != SPOTIFY_TRACK_PREFIX }
+        if (asked.isEmpty()) return LibraryCheck(emptySet(), emptySet(), false)
         val now = SystemClock.elapsedRealtime()
         // A page prefetch and the page opening ask for the same list within a second, and the
         // rows of a list ask again for what the list just confirmed: only what is unknown (or
         // old enough to have changed elsewhere) goes to Spotify.
-        val (known, unknown) = uris.partition { library.containsKey(it) && now - (savedAt[it] ?: 0L) < SAVED_FRESH_MS }
+        val (known, unknown) = asked.partition { library.containsKey(it) && now - (savedAt[it] ?: 0L) < SAVED_FRESH_MS }
         val out = known.filterTo(mutableSetOf()) { library[it] == true }
         if (unknown.isEmpty()) return LibraryCheck(out, emptySet(), false)
         // What this phone itself keeps (a catalog song's like, an artist's follow)

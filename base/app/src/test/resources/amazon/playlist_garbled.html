@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!-- A rendered Amazon Music playlist page in the shape Tyson's phone showed on
+     v26 (Nov 26, 2026, the "Hype Playlist" import): the row's text-bearing track
+     link carries the ARTIST CREDIT, not the title — the title is a plain line of
+     the row. A reader that takes the link's text as the title imports every song
+     under its artist's name. The second row has no title line anywhere: its only
+     texts are the credit twice and its duration, so it must not import at all. -->
+<html lang="en">
+<head>
+<title>Amazon Music: Hype Playlist</title>
+<meta property="og:title" content="Hype Playlist on Amazon Music">
+</head>
+<body>
+<header class="playlist-header">
+  <h1>Hype Playlist</h1>
+  <div class="meta">2 SONGS • 6 MINUTES</div>
+</header>
+<div class="tracklist">
+  <div class="row" data-testid="track-row">
+    <a href="/albums/B0ALBUM101?trackAsin=B0TRACK101"><img src="https://m.media-amazon.com/images/I/51too.jpg" alt=""></a>
+    <span class="track-name">Too Much</span>
+    <a class="credit" href="/albums/B0ALBUM101?trackAsin=B0TRACK101">The Kid LAROI, Jung Kook &amp; Central Cee</a>
+    <a class="artist" href="/artists/B0ARTIST11">The Kid LAROI, Jung Kook &amp; Central Cee</a>
+    <a class="album" href="/albums/B0ALBUM101">The First Time</a>
+    <span class="duration">3:47</span>
+  </div>
+  <div class="row" data-testid="track-row">
+    <a href="/albums/B0ALBUM102?trackAsin=B0TRACK102"><img src="https://m.media-amazon.com/images/I/51gone.jpg" alt=""></a>
+    <a class="credit" href="/albums/B0ALBUM102?trackAsin=B0TRACK102">The Kid LAROI</a>
+    <a class="artist" href="/artists/B0ARTIST12">The Kid LAROI</a>
+    <span class="duration">2:58</span>
+  </div>
+</div>
+</body>
+</html>

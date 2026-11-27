@@ -339,7 +339,9 @@ fun LibraryScreen(navController: NavController) {
                     val importedLists = com.music.spotui.data.local.ImportedPlaylists.list().map { p ->
                         com.music.spotui.data.entity.LibraryEntry(
                             spotifyId = IMPORTED_PLAYLIST_PREFIX + p.id, name = p.name,
-                            subtitle = stringResource(R.string.lbl_playlist) + " • " + stringResource(R.string.imported_playlist_subtitle),
+                            subtitle = stringResource(R.string.lbl_playlist) + " • " + stringResource(
+                                com.music.spotui.data.api.importedOriginLabelRes(com.music.spotui.data.api.importedOrigin(p)),
+                            ),
                             coverUri = if (p.cover.isNotBlank()) java.io.File(p.cover).toURI().toString()
                                 else p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl.orEmpty(), isPlaylist = true,
                         )
