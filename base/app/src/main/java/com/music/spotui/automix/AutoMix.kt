@@ -299,6 +299,12 @@ object AutoMix {
     /** Songs without an analysis for now, and why (shown through [missing]). */
     private val refused = HashMap<String, Reason>()
     @Volatile private var wanted: Set<String> = emptySet()
+    /** Waveform peaks by analysis key (the Mix editor's drawing data), kept with the analyses. */
+    private val peaksMemory = object : LinkedHashMap<String, FloatArray>(16, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, FloatArray>?) = size > 24
+    }
+    /** The Mix editor's asks under way, so a second ask of the same song adds no second decode. */
+    private val editorAsked = HashSet<String>()
 
     /** The analysis of [uri] if it is ready (memory or cache), else null. */
     fun analysis(uri: Uri): TrackAnalysis? {
@@ -351,6 +357,95 @@ object AutoMix {
         }
     }
 
+    /** How long one song's analysis may take before the song counts as failed (see [AnalysisDeadline]). */
+    private const val SONG_DEADLINE_MS = 45_000L
+
+    /**
+     * The Mix editor's ask: the analysis AND the waveform peaks of each of [uris], whatever the
+     * player is doing — these songs are not the player's `wanted`, and this ask neither drops nor
+     * is dropped by the player's own. [settled] runs on the worker once per song, analysed or
+     * failed: a song that cannot be analysed settles (its refusal readable through [missing])
+     * within its deadline, never as an endless wait.
+     */
+    fun requestEditor(uris: List<Uri>, settled: () -> Unit) {
+        val songs = uris.distinctBy(::requestId)
+        if (songs.isEmpty()) return
+        val fresh = synchronized(memory) { songs.filter { editorAsked.add(requestId(it)) } }
+        if (fresh.isEmpty()) return
+        val epoch = cacheEpoch
+        worker.execute {
+            try {
+                waitForThePage()
+                for (uri in fresh) {
+                    if (epoch != cacheEpoch) return@execute
+                    runCatching { editorSong(uri, epoch) }
+                    settled()
+                }
+            } finally { synchronized(memory) { fresh.forEach { editorAsked -= requestId(it) } } }
+        }
+    }
+
+    /** One editor song: the full analysis (which now also captures peaks), or peaks alone when the analysis is already kept. */
+    private fun editorSong(uri: Uri, epoch: Long) {
+        val id = requestId(uri)
+        refreshFileVersion(uri)
+        prepareStreamKey(uri)
+        val k = key(uri)
+        var haveAnalysis = synchronized(memory) { memory.containsKey(k) }
+        if (!haveAnalysis && (uri.scheme != ExtensionAudio.SCHEME || ExtensionAudio.streamOf(uri.lastPathSegment.orEmpty()) != null)) {
+            load(k)?.let { synchronized(memory) { memory[k] = it; refused -= id }; haveAnalysis = true }
+        }
+        if (haveAnalysis) {
+            if (synchronized(memory) { peaksMemory.containsKey(k) } || loadPeaks(k) != null) return
+            // The analysis predates waveform peaks: one decode for the peaks alone.
+            decodePeaks(uri, epoch)
+            return
+        }
+        val result = analyse(uri, epoch, owned = false)
+        if (result != null && epoch == cacheEpoch) {
+            synchronized(memory) { memory[result.first] = result.second; refused -= id; retry.succeeded(result.first) }
+        }
+    }
+
+    /** A decode for the peaks alone (a song analysed before peaks were kept); the analysis is untouched. */
+    private fun decodePeaks(uri: Uri, epoch: Long) {
+        var cacheKey = key(uri)
+        val deadline = AnalysisDeadline(SONG_DEADLINE_MS)
+        val cancelled = deadline.cancelled { epoch != cacheEpoch }
+        try {
+            if (uri.scheme == ExtensionAudio.SCHEME) {
+                if (ExtensionAudio.resolve(uri, ahead = true) == null) return
+                prepareStreamKey(uri)
+                cacheKey = key(uri)
+            }
+            if (cancelled()) return
+            val pcm = TrackDecoder.decode(uri, cancelled)
+            savePeaks(cacheKey, WaveformPeaks.compute(pcm.mid, pcm.side, pcm.length))
+            journal("peaks captured for ${label(uri)}")
+        } catch (e: Exception) {
+            if (!cancelled() && e !is InterruptedException) journal("peaks deferred for ${label(uri)}: ${e.javaClass.simpleName}")
+        }
+    }
+
+    /** The waveform peaks of [uri]'s song, if captured (memory; [requestEditor] loads them). */
+    fun peaks(uri: Uri): FloatArray? = synchronized(memory) { peaksMemory[key(uri)] }
+
+    private fun loadPeaks(key: String): FloatArray? = runCatching {
+        File(dir(), "$key.peaks").takeIf { it.exists() }?.let { f ->
+            f.setLastModified(System.currentTimeMillis())
+            WaveformPeaks.decode(f.readBytes())?.also { synchronized(memory) { peaksMemory[key] = it } }
+        }
+    }.getOrNull()
+
+    private fun savePeaks(key: String, peaks: FloatArray) {
+        synchronized(memory) { peaksMemory[key] = peaks }
+        runCatching {
+            val tmp = File(dir(), "$key.peaks.tmp")
+            tmp.writeBytes(WaveformPeaks.encode(peaks))
+            tmp.renameTo(File(dir(), "$key.peaks"))
+        }
+    }
+
     @Volatile private var pageWaited = false
 
     /**
@@ -366,10 +461,25 @@ object AutoMix {
 
     private const val PAGE_WAIT_MS = 25_000L
 
-    private fun analyse(uri: Uri, epoch: Long): Pair<String, TrackAnalysis>? {
+    /**
+     * One song's analysis, bounded by [AnalysisDeadline]: a stalled stream or decode settles the
+     * song as refused ([Reason.NotAnalyzed]) instead of holding the one worker — and every request
+     * behind it — forever. [owned]: the player's ask, cancelled when the song leaves [wanted];
+     * the Mix editor's asks (owned = false) are cancelled only by a cache clear.
+     */
+    private fun analyse(uri: Uri, epoch: Long, owned: Boolean = true): Pair<String, TrackAnalysis>? {
         val id = requestId(uri)
-        val cancelled = { epoch != cacheEpoch || id !in wanted }
+        val deadline = AnalysisDeadline(SONG_DEADLINE_MS)
+        val cancelled = deadline.cancelled { epoch != cacheEpoch || (owned && id !in wanted) }
         var cacheKey = key(uri)
+        // The deadline itself ended this song: record it as refused, so whoever waits on it
+        // (DJ Mix's batches, the Mix editor) sees it settle instead of spinning.
+        fun settleExpired(): Boolean {
+            if (!deadline.expired || epoch != cacheEpoch || (owned && id !in wanted)) return false
+            synchronized(memory) { retry.failed(cacheKey, android.os.SystemClock.elapsedRealtime()); refused[id] = Reason.NotAnalyzed }
+            journal("analysis timed out for ${label(uri)} after ${SONG_DEADLINE_MS / 1000} s")
+            return true
+        }
         try {
             if (uri.scheme == ExtensionAudio.SCHEME) {
                 val saver = com.music.spotui.data.DataSaver.active
@@ -383,7 +493,7 @@ object AutoMix {
                 // A source had not answered at the cache pass: its old analysis may now be usable.
                 load(cacheKey)?.let { return cacheKey to it }
             }
-            if (cancelled()) return null
+            if (cancelled()) { settleExpired(); return null }
             val t0 = System.currentTimeMillis()
             val pcm = TrackDecoder.decode(uri, cancelled)
             val t1 = System.currentTimeMillis()
@@ -391,14 +501,17 @@ object AutoMix {
             // the extra cores being small ones and the next song's decode running meanwhile.
             val threads = if (performancePriority) 1 else if (frugal()) 2 else if (charging()) THREADS else minOf(THREADS, 3)
             val a = Analyzer.analyze(pcm.mid, pcm.side, model(), cancelled, threads, pcm.length)
-            if (cancelled() || cacheKey != key(uri)) return null
+            if (cancelled() || cacheKey != key(uri)) { settleExpired(); return null }
             save(cacheKey, a)
+            // The editor's waveform, from this same decode (one pass over the signals, no second read).
+            savePeaks(cacheKey, WaveformPeaks.compute(pcm.mid, pcm.side, pcm.length))
             journal(String.format("analysed %s: %.1f BPM%s, %d bars, key %d, decode %d ms (bytes %d ms, %.1f MB, convert %d ms, %d restarts), analysis %d ms on %d threads", label(uri), a.bpm,
                 if (a.steady) " steady" else (if (a.tail != null) " (tail grid)" else " (no grid)"), a.bars, a.key, t1 - t0, pcm.readMs, pcm.bytes / 1e6, pcm.convertMs, pcm.restarts,
                 System.currentTimeMillis() - t1, threads) +
                 (if (a.note.isNotEmpty()) " | grids refused: ${a.note}" else ""))
             return cacheKey to a
         } catch (e: Exception) {
+            if (settleExpired()) return null
             // MediaExtractor can wrap the data source's cancellation IOException.
             if (cancelled() || e is InterruptedException) return null
             synchronized(memory) { retry.failed(cacheKey, android.os.SystemClock.elapsedRealtime()); refused[id] = Reason.NotAnalyzed }
@@ -541,7 +654,7 @@ object AutoMix {
     /** Off the main thread: every song analysed is dropped (they are analysed again when played). */
     fun clearCache() {
         cacheEpoch++
-        synchronized(memory) { memory.clear(); retry.clear(); refused.clear() }
+        synchronized(memory) { memory.clear(); peaksMemory.clear(); retry.clear(); refused.clear() }
         fileVersions.clear()
         dir().listFiles()?.forEach { it.delete() }
     }

@@ -15,7 +15,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -129,15 +128,17 @@ class DjMixSession(private val scope: CoroutineScope) {
             val pairs = batch.mapNotNull { song -> modelByKey[song.key]?.let { song to ExtensionAudio.localTrack(it) } }
             if (pairs.isNotEmpty()) {
                 AutoMix.request(pairs.map { it.second.uri }) {}
-                val deadline = System.currentTimeMillis() + BATCH_DEADLINE_MS
-                while (System.currentTimeMillis() < deadline) {
-                    currentCoroutineContext().ensureActive()
-                    val settled = pairs.all { (_, t) ->
-                        AutoMix.analysis(t.uri) != null || AutoMix.missing(t.uri) != null
-                    }
-                    if (settled) break
-                    delay(POLL_MS)
-                }
+                // Settled = analysed or refused, counted per song as it lands, so the bar moves
+                // with every song — a failed song moves it too. The engine settles every song
+                // within its own deadline now; this batch deadline is only the backstop.
+                val doneBefore = done
+                SettleWait.await(
+                    total = pairs.size,
+                    settledCount = { pairs.count { (_, t) -> AutoMix.analysis(t.uri) != null || AutoMix.missing(t.uri) != null } },
+                    deadlineMs = BATCH_DEADLINE_MS,
+                    pollMs = POLL_MS,
+                    onProgress = { state.value = DjMixState.Analyzing(category, doneBefore + it, pool.size) },
+                )
                 for ((song, t) in pairs) AutoMix.analysis(t.uri)?.let { analyses[song.key] = it }
             }
             done += batch.size

@@ -201,10 +201,10 @@ object LocalPlayer {
     private fun listenerFor(p: ExoPlayer): Player.Listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) = publish()
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
-            if (exo !== p || !com.music.spotui.automix.AutoMix.on || !com.music.spotui.automix.AutoMix.djEq) return
+            if (exo !== p || !com.music.spotui.automix.AutoMix.on || !(mix?.plan?.userEq ?: com.music.spotui.automix.AutoMix.djEq)) return
             deckEq?.release()
             deckEq = com.music.spotui.automix.DeckEq.attach(audioSessionId)
-            mix?.takeIf { it.deck === p }?.eq = deckEq
+            mix?.takeIf { it.deck === p && it.plan.userEq != false }?.eq = deckEq
         }
 
         // Each change of what the player does, one line each, so a song that never starts says why.
@@ -498,6 +498,8 @@ object LocalPlayer {
             SongPlayer.setRepeatMode(LocalRepeat.OFF)
         }
         SongPlayer.pauseEngineForLocal()
+        // A new list replaces any Mix editor preview: its plan belonged to the preview's own queue.
+        previewPlan = null; previewPair = null
         forgetRadio(); this.continues = continues
         // A station is a queue of its own: no Spotify songs after it, and its reconnect tries start afresh.
         val isStation = list.singleOrNull()?.isRadio == true
@@ -545,12 +547,53 @@ object LocalPlayer {
         endFade()
         active.value = false
         com.music.spotui.automix.AutoMix.cancelRequests()
+        previewPlan = null; previewPair = null
         forgetRadio(); continues = false; deletedDownloads.clear()
         handler.removeCallbacks(radioSteady)
         exo?.let { it.stop(); it.clearMediaItems() }
         tracks.clear(); unshuffled = null
         queued.clear(); playingQueued = null; radioSongs.clear()
         SongPlayer.restoreEngineQueue()
+    }
+
+    /** The play context a Mix editor preview runs under: no playlist, so no saved plan can meet it there. */
+    private const val PREVIEW_CONTEXT = "mixpreview:"
+    private const val PREVIEW_KEY = "preview"
+
+    /**
+     * The Mix editor's preview: a two-song queue whose only junction plays [plan] — the listener's
+     * edited transition, through this same plan path ([planFor] prefers it for the pair). [startMs]
+     * sits a few bars before the window, so what is heard is just the transition and B's entry.
+     * AutoMix must be on (the editor offers to turn it on; it is never flipped silently).
+     */
+    fun previewTransition(a: LocalTrack, b: LocalTrack, plan: app.myspoti.automix.MixPlan, startMs: Long) {
+        play(listOf(a, b), 0, context = "Mix preview", contextUri = PREVIEW_CONTEXT, startMs = startMs)
+        previewPlan = plan
+        previewPair = com.music.spotui.data.local.MixEdits.trackIdentity(a.uri) to com.music.spotui.data.local.MixEdits.trackIdentity(b.uri)
+    }
+
+    /** The key of the listener's plan for this pair (a preview's, or a saved edit's fingerprint); null: none. */
+    private fun editKeyFor(a: LocalTrack, b: LocalTrack): String? {
+        val ids = com.music.spotui.data.local.MixEdits.trackIdentity(a.uri) to com.music.spotui.data.local.MixEdits.trackIdentity(b.uri)
+        if (previewPlan != null && previewPair == ids) return PREVIEW_KEY
+        return com.music.spotui.data.local.MixEdits.playlistKeyOf(listUri)?.let { pk ->
+            com.music.spotui.data.local.MixEdits.get(pk, ids.first, ids.second)?.fingerprint
+        }
+    }
+
+    /**
+     * The listener's plan for this pair — a preview's plan as given, else the playlist's saved edit
+     * rebuilt by the planner — with its key; null: none saved, or the edit's window no longer fits
+     * (already passed, a song too short), in which case this play falls back on the automatic plan.
+     */
+    private fun editedPlanFor(a: LocalTrack, b: LocalTrack, ra: app.myspoti.automix.TrackAnalysis, rb: app.myspoti.automix.TrackAnalysis, earliest: Double): Pair<app.myspoti.automix.MixPlan, String>? {
+        val ids = com.music.spotui.data.local.MixEdits.trackIdentity(a.uri) to com.music.spotui.data.local.MixEdits.trackIdentity(b.uri)
+        previewPlan?.takeIf { previewPair == ids }?.let { return it to PREVIEW_KEY }
+        val edit = com.music.spotui.data.local.MixEdits.playlistKeyOf(listUri)?.let { pk ->
+            com.music.spotui.data.local.MixEdits.get(pk, ids.first, ids.second)
+        } ?: return null
+        val plan = app.myspoti.automix.MixPlanner.planCustom(ra, rb, edit.style, edit.bars, edit.endBarOffset, edit.eq, earliest, com.music.spotui.automix.AutoMix.settings()) ?: return null
+        return plan to edit.fingerprint
     }
 
 
@@ -645,8 +688,13 @@ object LocalPlayer {
         val fromIndex: Int, val toId: String, val plan: app.myspoti.automix.MixPlan,
         val analysisA: app.myspoti.automix.TrackAnalysis? = null,
         val analysisB: app.myspoti.automix.TrackAnalysis? = null,
+        /** The Mix editor key this plan was made from (an edit's fingerprint, or the preview's); null: an automatic plan. */
+        val savedKey: String? = null,
     ) { val provisional get() = analysisA == null || analysisB == null }
     @Volatile private var planned: Planned? = null
+    /** A Mix editor preview's plan and the pair (track identities) it belongs to; set just after its own [play] starts. */
+    @Volatile private var previewPlan: app.myspoti.automix.MixPlan? = null
+    @Volatile private var previewPair: Pair<String, String>? = null
     private var mix: MixRun? = null
     /** The main player's EQ (a deck's once it took over). */
     private var deckEq: com.music.spotui.automix.DeckEq? = null
@@ -765,7 +813,10 @@ object LocalPlayer {
         }
         // Policies are checked before a cached plan: a setting must apply immediately.
         if (spoken(a, b)) { planned = null; whyNot(com.music.spotui.automix.AutoMix.Reason.Podcast); return null }
-        if (followsOnAlbum(a, b)) { planned = null; whyNot(com.music.spotui.automix.AutoMix.Reason.Album); return null }
+        // The listener's own plan for this pair (a saved Mix edit, or a preview's) outranks the
+        // album-order rule: the edit was placed on this pair in this playlist on purpose.
+        val wantedKey = editKeyFor(a, b)
+        if (wantedKey == null && followsOnAlbum(a, b)) { planned = null; whyNot(com.music.spotui.automix.AutoMix.Reason.Album); return null }
         val ahead = "$cur|$nextId|${a.uri}|${b.uri}|${if (next + 1 < p.mediaItemCount) p.getMediaItemAt(next + 1).mediaId else ""}"
         val now = android.os.SystemClock.uptimeMillis()
         if (asking != ahead || now - askedAt >= 5_000) {
@@ -784,11 +835,24 @@ object LocalPlayer {
         val old = planned?.takeIf { it.fromIndex == cur && it.toId == nextId }
         val enoughLead = old != null && old.plan.exitA * 1000 > p.currentPosition + MixPreparation.MIN_LEAD_MS
         val upgraded = preparationFailures < 2 && old != null && MixPreparation.mayReplacePlan(mix?.state?.let { it >= MixState.PREROLL } == true, old.provisional, ra != null && rb != null)
-        if (enoughLead && !upgraded && (old!!.provisional || old.analysisA === ra && old.analysisB === rb)) return old.plan
+        // A cached plan made from another edit (or from none) is not this pair's plan anymore:
+        // an edit saved, changed or reset while the songs play applies at once.
+        if (enoughLead && !upgraded && old!!.savedKey == wantedKey && (old.provisional || old.analysisA === ra && old.analysisB === rb)) return old.plan
         val refused = (if (ra == null) com.music.spotui.automix.AutoMix.missing(a.uri) else null) ?: (if (rb == null) com.music.spotui.automix.AutoMix.missing(b.uri) else null)
         whyNot(refused)
         val segue = com.music.spotui.automix.AutoMix.segueActive
-        if (ra != null && rb != null && preparationFailures < 2 && noMixFor?.first === ra && noMixFor?.second === rb) return null
+        if (ra != null && rb != null && preparationFailures < 2 && wantedKey == null && noMixFor?.first === ra && noMixFor?.second === rb) return null
+        if (ra != null && rb != null && preparationFailures < 2 && wantedKey != null) {
+            val earliest = (p.currentPosition + RUN_UP_MS + startLead + 500) / 1000.0
+            val edited = editedPlanFor(a, b, ra, rb, earliest)
+            if (edited != null) {
+                planned = Planned(cur, nextId, edited.first, ra, rb, savedKey = edited.second)
+                whyNot(null)
+                com.music.spotui.automix.AutoMix.journal("${if (edited.second == PREVIEW_KEY) "preview" else "saved mix"} ${a.title} → ${b.title}: ${edited.first}")
+                return edited.first
+            }
+            // The window has passed or no longer fits: this play falls back on the automatic plan.
+        }
         if (ra != null && rb != null && preparationFailures < 2) {
             val earliest = (p.currentPosition + RUN_UP_MS + startLead + 500) / 1000.0
             if (!segueDecided(a, b, ra, rb, earliest)) return null
@@ -937,10 +1001,12 @@ object LocalPlayer {
         val trackA = tracks.getOrNull(p.currentMediaItemIndex) ?: return
         val trackB = tracks.getOrNull(next) ?: return
         val earliest = (p.currentPosition + RUN_UP_MS + startLead + 500) / 1000.0
-        if (!segueDecided(trackA, trackB, a, b, earliest)) return
+        // The listener's own plan for the pair needs no segue decision: it replaces the fallback too.
+        val edited = editedPlanFor(trackA, trackB, a, b, earliest)
+        if (edited == null && !segueDecided(trackA, trackB, a, b, earliest)) return
         // Once per completed analysis pair, including pairs with no future musical cue.
         planned = Planned(p.currentMediaItemIndex, nextId, run.plan, a, b)
-        val plan = choosePlan(a, b, earliest)
+        val plan = edited?.first ?: choosePlan(a, b, earliest)
         if (plan == null) {
             // The policy says no effect: the prepared fade goes too.
             if (com.music.spotui.automix.AutoMix.segueActive) { noMixFor = a to b; cancelMix("no mix for this pair", again = true) }
@@ -953,7 +1019,7 @@ object LocalPlayer {
         run.lastSpeed = run.deck.playbackParameters.speed
         run.deck.seekTo(run.startMs)
         run.state = if (run.deck.playbackState == Player.STATE_READY) MixState.READY else MixState.PREPARING
-        planned = Planned(p.currentMediaItemIndex, nextId, plan, a, b)
+        planned = Planned(p.currentMediaItemIndex, nextId, plan, a, b, savedKey = edited?.second)
         com.music.spotui.automix.AutoMix.journal("analysis ready: prepared fallback upgraded to $plan")
     }
 
@@ -1042,7 +1108,7 @@ object LocalPlayer {
         val runUpB = minOf(plan.entryB * 1000, (if (skip) SKIP_RUN_UP_MS else RUN_UP_MS) * plan.speedB)
         val start = (plan.entryB * 1000 - runUpB).toLong().coerceAtLeast(0L)
         // A data plan's lanes play in the audio chain, on no effect of the player's session.
-        val run = MixRun(plan, next, nextId, deck, (if (plan.segue == null && com.music.spotui.automix.AutoMix.djEq) com.music.spotui.automix.DeckEq.attach(deck.audioSessionId) else null), start, skip)
+        val run = MixRun(plan, next, nextId, deck, (if (plan.segue == null && (plan.userEq ?: com.music.spotui.automix.AutoMix.djEq)) com.music.spotui.automix.DeckEq.attach(deck.audioSessionId) else null), start, skip)
         plan.segue?.let { segueStages[deck]?.arm(it, app.myspoti.automix.segue.LaneSide.INCOMING) }
         run.eq?.set(app.myspoti.automix.MixPlan.KILL, 0.0)
         run.lastSpeed = deck.playbackParameters.speed
@@ -1050,7 +1116,7 @@ object LocalPlayer {
         mix = run
         deck.addListener(object : Player.Listener {
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
-                if (mix !== run || run.state >= MixState.MIXING || !com.music.spotui.automix.AutoMix.djEq || run.plan.segue != null) return
+                if (mix !== run || run.state >= MixState.MIXING || !(run.plan.userEq ?: com.music.spotui.automix.AutoMix.djEq) || run.plan.segue != null) return
                 run.eq?.release()
                 run.eq = com.music.spotui.automix.DeckEq.attach(audioSessionId)
                 run.eq?.set(app.myspoti.automix.MixPlan.KILL, 0.0)
@@ -1168,7 +1234,7 @@ object LocalPlayer {
         outgoing = a
         run.eqA = deckEq
         // A later plain plan still needs the main player's EQ.
-        deckEq = run.eq ?: if (run.plan.segue != null && com.music.spotui.automix.AutoMix.djEq) com.music.spotui.automix.DeckEq.attach(d.audioSessionId) else null
+        deckEq = run.eq ?: if (run.plan.segue != null && (run.plan.userEq ?: com.music.spotui.automix.AutoMix.djEq)) com.music.spotui.automix.DeckEq.attach(d.audioSessionId) else null
         run.state = MixState.MIXING
         // The run-up's nudges (up to 8 %, the pitch with them on a plain plan) were for a muted deck: the
         // mix starts at the plan's own speed, else a fade played the whole incoming song out of tune and
@@ -1267,7 +1333,7 @@ object LocalPlayer {
                 val recovery = if (run.recoveryStartedAt == 0L) 1f else ((android.os.SystemClock.uptimeMillis() - run.recoveryStartedAt) / 400f).coerceIn(0f, 1f)
                 a.volume = lv.gainA.toFloat() * (run.recoveryGainA + (1f - run.recoveryGainA) * recovery)
                 d.volume = lv.gainB.toFloat()
-                if (com.music.spotui.automix.AutoMix.djEq) { run.eqA?.set(lv.lowA, lv.highA); run.eq?.set(lv.lowB, lv.highB) }
+                if (run.plan.userEq ?: com.music.spotui.automix.AutoMix.djEq) { run.eqA?.set(lv.lowA, lv.highA); run.eq?.set(lv.lowB, lv.highB) }
                 // B low in the mix, or a cut (B whole at once, A out within two beats): corrected fast.
                 if (run.recoveryStartedAt == 0L) glide(run, a, x)
                 if (a.isPlaying) lock(run, a, preroll = false, quiet = lv.gainB < 0.35 || plan.style == app.myspoti.automix.MixPlan.Style.CUT)
@@ -1384,10 +1450,13 @@ object LocalPlayer {
 
     fun autoMixEqChanged() {
         if (!com.music.spotui.automix.AutoMix.djEq) {
-            deckEq?.neutral(); mix?.eqA?.neutral(); mix?.eq?.neutral()
+            deckEq?.neutral()
+            // A run whose plan carries the listener's own EQ choice (the Mix editor) keeps it:
+            // the plan's choice outranks the global toggle for that one transition.
+            mix?.takeIf { it.plan.userEq != true }?.let { it.eqA?.neutral(); it.eq?.neutral() }
         } else {
             exo?.let { if (deckEq == null) deckEq = com.music.spotui.automix.DeckEq.attach(it.audioSessionId) }
-            mix?.let { run ->
+            mix?.takeIf { it.plan.userEq != false }?.let { run ->
                 if (run.deck === exo) run.eq = deckEq
                 else if (run.eq == null) run.eq = com.music.spotui.automix.DeckEq.attach(run.deck.audioSessionId)
                 if (run.a !== exo && run.eqA == null) run.a?.let { run.eqA = com.music.spotui.automix.DeckEq.attach(it.audioSessionId) }

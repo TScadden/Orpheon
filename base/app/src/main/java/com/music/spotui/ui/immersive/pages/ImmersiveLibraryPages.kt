@@ -291,10 +291,12 @@ fun ImmersiveLocalPlaylistScreen(navController: NavController, id: String) {
                     when {
                         playingHere && SongPlayer.isPlaying() -> SongPlayer.pause()
                         playingHere -> SongPlayer.play()
-                        else -> LocalPlayer.play(tracks, 0, context = playlist.name)
+                        else -> LocalPlayer.play(tracks, 0, context = playlist.name,
+                            contextUri = com.music.spotui.data.local.MixEdits.localContextUri(id))
                     }
                 },
-                onShuffle = { LocalPlayer.play(tracks, tracks.indices.random(), shuffle = true, context = playlist.name) },
+                onShuffle = { LocalPlayer.play(tracks, tracks.indices.random(), shuffle = true, context = playlist.name,
+                    contextUri = com.music.spotui.data.local.MixEdits.localContextUri(id)) },
                 modifier = Modifier.padding(bottom = 8.dp),
             )
         }
@@ -310,7 +312,8 @@ fun ImmersiveLocalPlaylistScreen(navController: NavController, id: String) {
                         playing = current && SongPlayer.isPlaying(),
                         onClick = {
                             if (selecting) selection = com.music.spotui.ui.components.MultiSelect.toggle(selection, item.key)
-                            else LocalPlayer.play(tracks, index, context = playlist.name)
+                            else LocalPlayer.play(tracks, index, context = playlist.name,
+                                contextUri = com.music.spotui.data.local.MixEdits.localContextUri(id))
                         },
                         onMore = if (selecting) null else ({ rowMenu = item }),
                         onLongClick = {
@@ -321,6 +324,15 @@ fun ImmersiveLocalPlaylistScreen(navController: NavController, id: String) {
                 }
                 // The swipe and a selection would fight: while selecting, rows only tap.
                 if (selecting) row() else ImmersiveSwipeToRemove(item.key, onRemove = { LocalPlaylists.remove(id, item.key) }) { row() }
+                // The junction into the next song: its Mix editor (and the marker of a saved mix).
+                if (!selecting && index < playlist.items.lastIndex) {
+                    val idA = com.music.spotui.data.local.MixEdits.trackIdentity(tracks[index].uri)
+                    val idB = com.music.spotui.data.local.MixEdits.trackIdentity(tracks[index + 1].uri)
+                    com.music.spotui.ui.components.MixJunctionStrip(
+                        edited = com.music.spotui.data.local.MixEdits.has("local:$id", idA, idB),
+                        immersive = true,
+                    ) { navController.navigate(com.music.spotui.ui.navigation.mixEditorRoute("local:$id", idA, idB)) }
+                }
             }
         }
     }

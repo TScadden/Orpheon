@@ -78,6 +78,97 @@ object MixPlanner {
         return fade(a, b, sa, if (match == null) "no checked beat pair" else "no safe blend ahead", s.fadeSec, earliestExit, s.durationBounds)
     }
 
+    /**
+     * A transition the listener placed by hand (the Mix editor): [style] as asked, a window of
+     * [bars] bars of A ending [endBarOffset] bars before A's last bar, B at the entry the planner
+     * itself would choose. Null when the ask cannot be honoured — no grid or no common tempo for a
+     * blend, no tail grid for a cut, the window already passed at [earliestExit], a song too short
+     * for the window — so the caller falls back on the automatic plan rather than playing something
+     * else under the edit's name. [eq] is carried on the plan ([MixPlan.userEq]): the listener's own
+     * choice for this pair, over the global DJ-EQ setting.
+     */
+    fun planCustom(a: TrackAnalysis, b: TrackAnalysis, style: MixPlan.Style, bars: Int, endBarOffset: Int,
+                   eq: Boolean, earliestExit: Double, s: Settings = Settings()): MixPlan? {
+        if (a.bars == 0 || b.bars == 0) return null
+        val n = bars.coerceIn(1, 32)
+        val endBar = (a.bars - 1 - endBarOffset.coerceAtLeast(0)).coerceAtLeast(0)
+        val endTime = a.barEnd(endBar)
+        if (endTime <= a.contentStart + 0.05 || endTime <= earliestExit) return null
+        val sb = summary(b)
+        return when (style) {
+            MixPlan.Style.BLEND -> customBlend(a, b, sb, n, endTime, earliestExit, eq, s)
+            MixPlan.Style.CUT -> customCut(a, b, sb, endTime, earliestExit, eq, s)
+            MixPlan.Style.FADE -> customFade(a, b, n, endTime, earliestExit, eq)
+        }
+    }
+
+    private fun customBlend(a: TrackAnalysis, b: TrackAnalysis, sb: Summary, bars: Int, endTime: Double,
+                            earliest: Double, eq: Boolean, s: Settings): MixPlan? {
+        val ga = a.tail?.takeIf { !a.tailDown.isNaN() } ?: return null
+        val gb = b.head?.takeIf { !b.headDown.isNaN() } ?: return null
+        val m = tempoMatch(ga.bpm, gb.bpm)
+        if (abs(m.speed - 1) > s.maxStretch) return null
+        // Half or double time over a long window is two grooves meeting every other beat (see blend()).
+        if (m.beatsPerB != 1.0 && bars > 8) return null
+        val barA = 4 * ga.period
+        val len = bars * barA
+        // The last downbeat whose whole window still ends by [endTime].
+        var exit = firstDown(ga, a.tailDown, max(earliest, endTime - len - barA))
+        var chosen: Double? = null
+        while (exit + len <= endTime + 0.01 && exit + len <= a.contentEnd + 0.01 && exit <= ga.last + ga.period) {
+            if (exit >= earliest) chosen = exit
+            exit += barA
+        }
+        val exitA = chosen ?: return null
+        val entry = entryCues(b, sb, gb).maxByOrNull { it.score }?.time ?: return null
+        if (entry + len * m.speed > b.contentEnd - 0.05) return null
+        val swapBar = bassSwapBar(b, sb, gb, entry, bars, barA, m.speed)
+        return MixPlan(MixPlan.Style.BLEND, exitA, entry, len, m.speed, bars * 4,
+            swapBar / bars, 1.0 / (bars * 4), matchGain(a, b), restore(m.speed, gb.period),
+            String.format("your mix: %d bars, %.1f→%.1f BPM", bars, ga.bpm, gb.bpm),
+            matchA = matchGainA(a, b), userEq = eq)
+    }
+
+    private fun customCut(a: TrackAnalysis, b: TrackAnalysis, sb: Summary, endTime: Double,
+                          earliest: Double, eq: Boolean, s: Settings): MixPlan? {
+        val ga = a.tail?.takeIf { !a.tailDown.isNaN() } ?: return null
+        val len = 2 * ga.period
+        // The last downbeat whose cut has landed by [endTime] (a cut's length is its two beats;
+        // the editor's bars set the blend and fade windows, not a cut's).
+        var exit = firstDown(ga, a.tailDown, max(earliest, endTime - len - 4 * ga.period))
+        var chosen: Double? = null
+        while (exit + len <= endTime + 0.01 && exit + len <= a.contentEnd + 0.01 && exit <= ga.last + ga.period) {
+            if (exit >= earliest) chosen = exit
+            exit += 4 * ga.period
+        }
+        val exitA = chosen ?: return null
+        val gb = b.head?.takeIf { !b.headDown.isNaN() }
+        val entry = if (gb != null) entryCues(b, sb, gb).maxByOrNull { it.score }?.time ?: b.contentStart else b.contentStart
+        val m = gb?.let { tempoMatch(ga.bpm, it.bpm) }
+        val synced = m != null && abs(m.speed - 1) <= s.maxStretch
+        val speed = if (synced) m!!.speed else 1.0
+        if (entry + len * speed > b.contentEnd - 0.05) return null
+        return MixPlan(MixPlan.Style.CUT, exitA, entry, len, speed, 2, 0.0, 0.5, matchGain(a, b),
+            if (synced) restore(speed, gb!!.period) else 0.0, "your mix: cut",
+            matchA = matchGainA(a, b), userEq = eq)
+    }
+
+    private fun customFade(a: TrackAnalysis, b: TrackAnalysis, bars: Int, endTime: Double,
+                           earliest: Double, eq: Boolean): MixPlan? {
+        val barSec = a.tail?.let { 4 * it.period } ?: if (a.bpm > 0) 240.0 / a.bpm else 8.0
+        var len = bars * barSec
+        val gb = b.head?.takeIf { !b.headDown.isNaN() }
+        val entry = if (gb != null) firstDown(gb, b.headDown, b.contentStart - 0.08) else b.contentStart
+        len = min(len, b.contentEnd - entry)
+        if (len < 0.35) return null
+        val target = endTime - len
+        val exit = a.barStarts.lastOrNull { it <= target && it >= earliest } ?: target.takeIf { it >= earliest } ?: return null
+        val real = min(len, a.contentEnd - exit)
+        if (real < 0.35) return null
+        return MixPlan(MixPlan.Style.FADE, exit, entry, real, 1.0, 0, 0.5, 0.1, matchGain(a, b), 0.0,
+            String.format("your mix: fade of %d bars", bars), matchA = matchGainA(a, b), userEq = eq)
+    }
+
     /** Next: a short mix from the next downbeat; either analysis may be unavailable. */
     fun planSkip(a: TrackAnalysis?, b: TrackAnalysis?, now: Double, lead: Double, s: Settings = Settings()): MixPlan {
         require(s.durationBounds.isUnbounded) { "use planSkipBounded for explicit duration constraints; no plan may fit" }
