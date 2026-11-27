@@ -50,7 +50,7 @@ object TrackDecoder {
      * screens' percentages and the analysis watchdog's progress counter; it is never guessed
      * from elapsed time.
      */
-    fun decode(uri: Uri, cancelled: () -> Boolean, onProgress: (bytes: Long, totalBytes: Long, decodedSec: Double, durationSec: Double) -> Unit = {}): Pcm {
+    fun decode(uri: Uri, cancelled: () -> Boolean, onProgress: (bytes: Long, totalBytes: Long, decodedSec: Double, durationSec: Double) -> Unit = { _, _, _, _ -> }): Pcm {
         val source = ByteSource(uri, cancelled)
         val extractor = MediaExtractor()
         try {
@@ -90,7 +90,7 @@ object TrackDecoder {
      * the expensive way to redraw a picture. Without a stated duration there is no timeline
      * to bucket against, so those (rare) songs fall back to the full decode's peaks.
      */
-    fun decodePeaks(uri: Uri, cancelled: () -> Boolean, buckets: Int = WaveformPeaks.BUCKETS, onProgress: (bytes: Long, totalBytes: Long, decodedSec: Double, durationSec: Double) -> Unit = {}): FloatArray {
+    fun decodePeaks(uri: Uri, cancelled: () -> Boolean, buckets: Int = WaveformPeaks.BUCKETS, onProgress: (bytes: Long, totalBytes: Long, decodedSec: Double, durationSec: Double) -> Unit = { _, _, _, _ -> }): FloatArray {
         val source = ByteSource(uri, cancelled)
         val extractor = MediaExtractor()
         try {
