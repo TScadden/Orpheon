@@ -20,9 +20,15 @@ import java.io.File
  * the store files alone (it inits and awaits both stores itself), and must still refuse
  * an address no answer exposes. Before the fix the same call read the stores before
  * their loads landed and answered null for a file the phone has: "error gone".
+ *
+ * The qualifiers in the config are this class's own on purpose: Robolectric classes
+ * sharing a config share a sandbox, and with it the stores' singletons — an earlier
+ * class (OnboardingTest) inits them against its own data dir and loads them empty,
+ * which would leave this test reading a store that can never see the fixture. A
+ * config of its own is a cold process of its own, the state under test.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], application = android.app.Application::class)
+@Config(sdk = [35], application = android.app.Application::class, qualifiers = "w412dp-h892dp")
 class WatchLocalFileTest {
 
     @Test fun aListedFileOpensColdAndAnUnlistedOneDoesNot() {

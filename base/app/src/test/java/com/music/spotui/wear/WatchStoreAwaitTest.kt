@@ -22,9 +22,15 @@ import java.io.File
  * short. awaitLoaded is the contract the answers now rely on: when it returns, the
  * file's content IS the store's state. Each store is touched cold exactly once here —
  * its first touch in this class is the fixture's.
+ *
+ * The qualifiers in the config are this class's own on purpose: Robolectric classes
+ * sharing a config share a sandbox, and with it the stores' singletons — an earlier
+ * class (OnboardingTest) inits them against its own data dir and loads them empty,
+ * which would leave these tests reading a store that can never see the fixture. A
+ * config of its own is a cold process of its own, the state under test.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], application = android.app.Application::class)
+@Config(sdk = [35], application = android.app.Application::class, qualifiers = "w411dp-h891dp")
 class WatchStoreAwaitTest {
 
     @Test fun likedFilesAreThereWhenTheAwaitReturns() {
