@@ -161,6 +161,7 @@ fun PlayDebugContent(row: ImportedSong, modifier: Modifier = Modifier) {
 }
 
 /** The Play debug sheet, shared by both looks' song menus (as the credits sheet is). */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun PlayDebugSheet(row: ImportedSong, onDismiss: () -> Unit) {
     LookSheet(onDismissRequest = onDismiss, containerColor = com.music.spotui.ui.theme.tone(0xFF282828)) {
