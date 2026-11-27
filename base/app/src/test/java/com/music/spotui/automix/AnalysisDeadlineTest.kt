@@ -42,4 +42,44 @@ class AnalysisDeadlineTest {
         repeat(100) { clock += 100; assertFalse(cancelled()) }
         assertFalse(deadline.expired)
     }
+
+    @Test fun aProgressingSourceSurvivesPastTheOldFlatDeadline() {
+        // The flat 45 s refused a big song on a slow connection while it was still
+        // delivering. The watchdog only asks that the work keeps moving: two minutes of
+        // steady progress — far past the old flat deadline — never expires.
+        var t = 0L
+        var work = 0L
+        val deadline = AnalysisDeadline(limitMs = 240_000, stallMs = 25_000, progress = { work }, now = { t })
+        val cancelled = deadline.cancelled { false }
+        while (t < 120_000) { t += 5_000; work += 1; assertFalse(cancelled()) }
+        assertFalse(deadline.expired)
+    }
+
+    @Test fun aStalledSourceExpiresAtTheStallBound() {
+        var t = 0L
+        var work = 0L
+        val deadline = AnalysisDeadline(limitMs = 240_000, stallMs = 25_000, progress = { work }, now = { t })
+        val cancelled = deadline.cancelled { false }
+        // Progress for a while, then the stream stops arriving: the stall bound, not the
+        // hard one, is what settles it — and says so.
+        repeat(4) { t += 5_000; work += 1; assertFalse(cancelled()) }
+        t += 24_999
+        assertFalse(cancelled())
+        t += 1
+        assertTrue(cancelled())
+        assertTrue(deadline.expired)
+        assertTrue(deadline.stalled)
+    }
+
+    @Test fun theHardBoundFiresEvenWhileProgressContinues() {
+        var t = 0L
+        var work = 0L
+        val deadline = AnalysisDeadline(limitMs = 60_000, stallMs = 25_000, progress = { work }, now = { t })
+        val cancelled = deadline.cancelled { false }
+        while (t < 55_000) { t += 5_000; work += 1; assertFalse(cancelled()) }
+        t += 5_000
+        assertTrue(cancelled())
+        assertTrue(deadline.expired)
+        assertFalse(deadline.stalled)
+    }
 }

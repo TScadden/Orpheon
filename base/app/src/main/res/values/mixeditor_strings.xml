@@ -5,8 +5,14 @@
     <string name="mix_junction_edited">Mix · Edited</string>
     <string name="mix_editor_title">Mix</string>
     <string name="mix_analyzing">Analyzing both songs…</string>
+    <string name="mix_analyzing_progress">Analyzing %1$s… %2$d%%</string>
+    <string name="mix_retry">Retry</string>
     <string name="mix_couldnt_title">This junction can\'t be mixed yet</string>
     <string name="mix_couldnt_body">%1$s couldn\'t be analyzed, so there is nothing to mix with yet.</string>
+    <string name="mix_couldnt_stalled">%1$s\'s download stalled — no audio arrived for a while, so its analysis was stopped. Check your connection and try again.</string>
+    <string name="mix_couldnt_too_long">%1$s took too long to analyze, so it was stopped. Try again.</string>
+    <string name="mix_couldnt_no_stream">No source could fetch %1$s to analyze it — it may be unavailable from your sources right now.</string>
+    <string name="mix_couldnt_source">%1$s couldn\'t be fetched or analyzed. Try again.</string>
     <string name="mix_couldnt_mobile_data">%1$s wasn\'t analyzed: it is a stream and the phone is on mobile data. Connect to Wi-Fi or turn on “Analyze on mobile data” in the AutoMix settings, then try again.</string>
     <string name="mix_preview">Preview</string>
     <string name="mix_save">Save mix</string>

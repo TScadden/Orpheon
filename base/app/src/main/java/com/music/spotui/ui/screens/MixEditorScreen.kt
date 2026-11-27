@@ -23,6 +23,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -100,8 +101,12 @@ fun MixEditorScreen(navController: NavController, playlistKey: String, idA: Stri
     var settled by remember { mutableIntStateOf(0) }
     var polls by remember { mutableIntStateOf(0) }
     var gaveUp by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { AutoMix.requestEditor(listOf(trackA.uri, trackB.uri)) { settled++ } }
-    LaunchedEffect(Unit) { delay(120_000); gaveUp = true }
+    var round by remember { mutableIntStateOf(0) }
+    LaunchedEffect(round) { AutoMix.requestEditor(listOf(trackA.uri, trackB.uri)) { settled++ } }
+    // The backstop only: every song settles itself now (analysed or refused, with its reason),
+    // and a slow-but-progressing song may legitimately run past the old 45 s — the pair's own
+    // worst case is two hard-bounded songs back to back on the pool.
+    LaunchedEffect(round) { delay(300_000); gaveUp = true }
 
     // Reading polls re-reads the engine's answers as they land.
     val tick = polls
@@ -125,15 +130,46 @@ fun MixEditorScreen(navController: NavController, playlistKey: String, idA: Stri
                 modifier = Modifier.padding(start = 6.dp))
         }
         when {
-            failed -> MixEditorFailed(trackA, trackB, analysisA, analysisB)
-            !ready -> Column(
-                Modifier.fillMaxSize().padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                CircularProgressIndicator(color = Immersive.Accent)
-                Text(stringResource(R.string.mix_analyzing), color = Immersive.TextSecondary, fontSize = 14.sp,
-                    modifier = Modifier.padding(top = 16.dp))
+            failed -> MixEditorFailed(trackA, trackB, analysisA, analysisB) {
+                // The failed songs' refusals are forgotten and the pair is asked again: the
+                // ready song settles at once, the failed one starts fresh at editor priority.
+                if (analysisA == null) AutoMix.forgetRefusal(trackA.uri)
+                if (analysisB == null) AutoMix.forgetRefusal(trackB.uri)
+                settled = 0
+                gaveUp = false
+                round++
+            }
+            !ready -> {
+                // The percentage is the work's own truth (the decoder's position, the
+                // analyser's frames — see AutoMix.progressOf); while a song's total is
+                // genuinely unknown the pair stays indeterminate rather than invent a number.
+                val progressA = AutoMix.progressOf(trackA.uri)
+                val progressB = AutoMix.progressOf(trackB.uri)
+                val pairProgress = com.music.spotui.automix.AnalysisProgress.pair(progressA, progressB)
+                Column(
+                    Modifier.fillMaxSize().padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    if (pairProgress != null) {
+                        val current = if ((progressA ?: 0f) <= (progressB ?: 0f)) trackA else trackB
+                        LinearProgressIndicator(
+                            progress = { pairProgress },
+                            color = Immersive.Accent,
+                            trackColor = Immersive.Raised,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            stringResource(R.string.mix_analyzing_progress, current.title, (pairProgress * 100).toInt()),
+                            color = Immersive.TextSecondary, fontSize = 14.sp,
+                            modifier = Modifier.padding(top = 16.dp),
+                        )
+                    } else {
+                        CircularProgressIndicator(color = Immersive.Accent)
+                        Text(stringResource(R.string.mix_analyzing), color = Immersive.TextSecondary, fontSize = 14.sp,
+                            modifier = Modifier.padding(top = 16.dp))
+                    }
+                }
             }
             else -> MixEditorBody(
                 navController, playlistKey, idA, idB, trackA, trackB,
@@ -143,18 +179,46 @@ fun MixEditorScreen(navController: NavController, playlistKey: String, idA: Stri
     }
 }
 
-/** A song of the pair could not be analysed: said plainly, with the engine's own reason where it has one. */
+/** Which failure line the editor shows for a refused song: the engine's recorded reason, worded plainly. */
+internal enum class MixFailureCopy { Generic, MobileData, Stalled, TooLong, NoStream, SourceError }
+
+internal fun mixFailureCopy(reason: AutoMix.Reason?, detail: AutoMix.RefusalDetail?): MixFailureCopy = when {
+    reason == AutoMix.Reason.MobileData -> MixFailureCopy.MobileData
+    detail == AutoMix.RefusalDetail.Stalled -> MixFailureCopy.Stalled
+    detail == AutoMix.RefusalDetail.TooLong -> MixFailureCopy.TooLong
+    detail == AutoMix.RefusalDetail.NoStream -> MixFailureCopy.NoStream
+    detail == AutoMix.RefusalDetail.SourceError -> MixFailureCopy.SourceError
+    else -> MixFailureCopy.Generic
+}
+
+/** A song of the pair could not be analysed: said plainly, with the engine's own reason, and a way to try again. */
 @Composable
-private fun MixEditorFailed(trackA: LocalTrack, trackB: LocalTrack, analysisA: TrackAnalysis?, analysisB: TrackAnalysis?) {
+private fun MixEditorFailed(trackA: LocalTrack, trackB: LocalTrack, analysisA: TrackAnalysis?, analysisB: TrackAnalysis?, onRetry: () -> Unit) {
     val bad = if (analysisA == null) trackA else trackB
-    val reason = AutoMix.missing(bad.uri)
+    val copy = mixFailureCopy(AutoMix.missing(bad.uri), AutoMix.missingDetail(bad.uri))
     Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.Center) {
         Text(stringResource(R.string.mix_couldnt_title), color = Immersive.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Text(
-            if (reason == AutoMix.Reason.MobileData) stringResource(R.string.mix_couldnt_mobile_data, bad.title)
-            else stringResource(R.string.mix_couldnt_body, bad.title),
+            stringResource(
+                when (copy) {
+                    MixFailureCopy.MobileData -> R.string.mix_couldnt_mobile_data
+                    MixFailureCopy.Stalled -> R.string.mix_couldnt_stalled
+                    MixFailureCopy.TooLong -> R.string.mix_couldnt_too_long
+                    MixFailureCopy.NoStream -> R.string.mix_couldnt_no_stream
+                    MixFailureCopy.SourceError -> R.string.mix_couldnt_source
+                    MixFailureCopy.Generic -> R.string.mix_couldnt_body
+                },
+                bad.title,
+            ),
             color = Immersive.TextSecondary, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp),
         )
+        Spacer(Modifier.height(20.dp))
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.clip(RoundedCornerShape(50)).background(Immersive.Accent)
+                .pressable(0.95f) { onRetry() }
+                .padding(horizontal = 22.dp, vertical = 12.dp),
+        ) { Text(stringResource(R.string.mix_retry), color = Immersive.Page, fontSize = 15.sp, fontWeight = FontWeight.Bold) }
     }
 }
 

@@ -101,6 +101,17 @@ fun DjMixDialog(navController: NavController, onDismiss: () -> Unit) {
                         else stringResource(R.string.djmix_done_appended, s.summary.sequenced, s.summary.appended),
                         color = AppMuted, fontSize = 13.sp,
                     )
+                    if (s.summary.appended > 0) when (s.refusal) {
+                        com.music.spotui.automix.AutoMix.Reason.MobileData -> {
+                            Spacer(Modifier.height(4.dp))
+                            Text(stringResource(R.string.djmix_done_refused_mobile_data), color = AppMuted, fontSize = 13.sp)
+                        }
+                        com.music.spotui.automix.AutoMix.Reason.NotAnalyzed -> {
+                            Spacer(Modifier.height(4.dp))
+                            Text(stringResource(R.string.djmix_done_refused_failed), color = AppMuted, fontSize = 13.sp)
+                        }
+                        else -> Unit
+                    }
                 }
                 is DjMixState.Failed -> Text(djFailureText(s.failure), color = AppText, fontSize = 14.sp)
             }

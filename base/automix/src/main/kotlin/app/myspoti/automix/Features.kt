@@ -56,7 +56,7 @@ class Features private constructor(
          * [length]: the samples of [mid] and [side] that are the song (the decoder's buffers are
          * longer, and a copy to size took a second song's worth of memory: reported OOM).
          */
-        fun of(mid: FloatArray, side: FloatArray?, cancelled: () -> Boolean = { false }, threads: Int = 1, length: Int = mid.size): Features {
+        fun of(mid: FloatArray, side: FloatArray?, cancelled: () -> Boolean = { false }, threads: Int = 1, length: Int = mid.size, onProgress: (Float) -> Unit = {}): Features {
             if (cancelled()) throw InterruptedException("analysis cancelled")
             val win = onsetWindow
             val frames = max(1, (length - N) / HOP + 1)
@@ -79,6 +79,17 @@ class Features private constructor(
             var chromaResult: Triple<Array<FloatArray>, FloatArray, Boolean>? = null
             val budget = max(1, threads)
             val slices = max(1, budget - 1)
+            // Progress, truthfully: onset frames completed against the frame count, reported
+            // as the count crosses each few percent (the chroma runs beside them, uncounted).
+            val doneFrames = java.util.concurrent.atomic.AtomicInteger()
+            var lastReported = 0f
+            val reportLock = Any()
+            fun reportProgress() {
+                val frac = doneFrames.get().toFloat() / frames
+                synchronized(reportLock) {
+                    if (frac - lastReported >= 0.02f || frac >= 1f) { lastReported = frac; onProgress(frac) }
+                }
+            }
             // Task 0: the chroma; tasks 1..slices: the onset frames, a slice each (from the frame before it, for the flux).
             parallel(slices + 1, budget) { task ->
               if (task == 0) chromaResult = chromaAndCentre(mid, side, cancelled, length) else {
@@ -87,8 +98,10 @@ class Features private constructor(
               val frame = DoubleArray(N); val mag = DoubleArray(N / 2 + 1)
               val re = DoubleArray(N); val im = DoubleArray(N)
               var prev = DoubleArray(BANDS); var cur = DoubleArray(BANDS)
+              var sinceFlush = 0
               for (f in max(0, f0.toInt() - 1) until f1.toInt()) {
                 if (f and 1023 == 0 && cancelled()) throw InterruptedException("analysis cancelled")
+                if (f >= f0 && ++sinceFlush >= 256) { sinceFlush = 0; doneFrames.addAndGet(256); reportProgress() }
                 val start = f * HOP
                 for (i in 0 until N) frame[i] = sample(mid, start + i, length) * win[i]
                 fft.magnitudes(frame, mag, re, im)
@@ -115,6 +128,7 @@ class Features private constructor(
                 }
                 val t = prev; prev = cur; cur = t
               }
+              if (sinceFlush > 0) { doneFrames.addAndGet(sinceFlush); reportProgress() }
               }
             }
 
