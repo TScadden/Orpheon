@@ -19,6 +19,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
+import kotlin.math.abs
 
 /**
  * Reading an Amazon Music playlist on the phone.
@@ -111,6 +112,8 @@ data class AmazonReadout(
     val wall: AmazonWall,
     val loadOutcome: String,
     val lastPoll: String,
+    /** The first poll met an empty shell and the page was reloaded once (see the session). */
+    val reloaded: Boolean = false,
 ) {
     fun text(): String = buildString {
         appendLine("AMAZON READ")
@@ -127,6 +130,7 @@ data class AmazonReadout(
             },
         )
         appendLine("load: $loadOutcome")
+        appendLine("reloaded once: ${if (reloaded) "yes" else "no"}")
         appendLine("last poll: $lastPoll")
     }.trimEnd()
 }
@@ -168,6 +172,13 @@ object AmazonDom {
     private val SIGN_IN_LINK = Regex("""href\s*=\s*"[^"]*(?:ap/signin|/signin)""", RegexOption.IGNORE_CASE)
     private val SIGN_IN_CTA = Regex(""">\s*sign in\s*<""", RegexOption.IGNORE_CASE)
 
+    /** A line that states a song count ("84 songs", "84 SONGS", "1 song"): the
+     * playlist header's own furniture, never a song's title. */
+    private val COUNT_LINE = Regex("""^\d[\d,]*\s+songs?$""", RegexOption.IGNORE_CASE)
+
+    /** Whether [title] is a count line — the header read as a row (see [parse]). */
+    internal fun isCountLine(title: String): Boolean = COUNT_LINE.matches(title.trim())
+
     /**
      * A rendered playlist page's HTML (shadow roots inlined — see the reader's
      * serializer) → its rows, by two readings merged. The first is the player's
@@ -180,10 +191,13 @@ object AmazonDom {
         val linked = parseAnchors(html)
         val seen = linked.mapTo(HashSet()) { rowKey(it) }
         val rows = (linked + parseRowElements(html).filter { rowKey(it) !in seen })
-            // The last line of defence, behind both readings' own re-derivation: a
-            // row whose title merely restates its artist is a misread of the page
-            // (the artist line read as the title), never a song.
-            .filterNot { sameName(it.title, it.artist) }
+            // The last lines of defence, behind both readings' own checks: a row
+            // whose title merely restates its artist is a misread of the page (the
+            // artist line read as the title), never a song; and a row whose title
+            // is a count line is the playlist's own header read as a row — it
+            // imported as a junk first song titled "84 SONGS" on a phone, ahead
+            // of the real first track, which lost its slot to it.
+            .filterNot { sameName(it.title, it.artist) || isCountLine(it.title) }
         return Page(name(html), declaredTotal(html, rows.size), rows)
     }
 
@@ -256,6 +270,9 @@ object AmazonDom {
                         !it.matches(DURATION_LINE)
                 } ?: return@mapIndexedNotNull null
             }
+            // The header's count line is not this row's title either (the header
+            // block can sit inside the first row's territory): never a song.
+            if (isCountLine(title)) return@mapIndexedNotNull null
             val cover = IMAGE.findAll(html.substring(prevTitleEnd, titleStart)).lastOrNull()
                 ?.groupValues?.get(1)?.takeIf { it.startsWith("http") && "transparent" !in it && "pixel" !in it }
                 .orEmpty()
@@ -329,6 +346,12 @@ object AmazonDom {
                         !it.matches(DURATION_LINE)
                 } ?: return@mapIndexedNotNull null
             }
+            // The playlist header presents itself as a row element on the current
+            // player (its block carries the list's furniture): its "title" is the
+            // count line and its "artist" the playlist's top credit. It is the
+            // header, never the first song — reading it as one put a junk
+            // "84 SONGS" row ahead of the real first track.
+            if (isCountLine(title)) return@mapIndexedNotNull null
             if (title.isBlank() || artist.isBlank()) return@mapIndexedNotNull null
             val durationMs = DURATION.find(segment)?.let { (it.groupValues[1].toLong() * 60 + it.groupValues[2].toLong()) * 1000 } ?: 0L
             val cover = IMAGE.find(segment)?.groupValues?.get(1)
@@ -379,20 +402,43 @@ object AmazonDom {
     /** The first row link of the page: an address carrying a track ASIN. */
     private val TRACK_LINK = Regex("""href\s*=\s*"[^"]*trackAsin=""", RegexOption.IGNORE_CASE)
 
+    /** How far from the playlist's own name its header's count may sit (the same block). */
+    private const val NAME_WINDOW = 8_000
+
     /**
-     * How many songs the page itself declares, when it declares any: the header's
-     * "N songs" — the LAST count stated before the first row link, because the
-     * playlist's own header is the count-bearing block closest above its rows.
-     * A count found anywhere else is not this playlist's size: the page's chrome
-     * carries other playlists' counts (a rail card's "10 songs"), and taking the
-     * first count on the page capped a long playlist at an incidental 10 —
-     * collection ended the moment 10 were held, its real header unread. Null
-     * when the header states none — a reader must not mistake the rows it
+     * How many songs the page itself declares, when it declares any. The total is
+     * ADVISORY only — it sizes the summary's "of M" and nothing else; collection
+     * never ends on it (see [CollectEnd]) — but the summary must still be the
+     * header's truth, so the count taken is the LARGEST one stated near the
+     * playlist's own name: its header block carries the name and the count
+     * together, and the header's 84 must outvote a rail card's incidental 10.
+     *
+     * The rule this replaces — the last count before the first row link — read
+     * 10 for Tyson's 84-song playlist: the player's hero block links the first
+     * track ahead of the header, so the only count before that link was a rail
+     * card's, the header's own count sat below the link unread, and the confirm
+     * step said "10 of 10 songs read" over a short read. When the page's name
+     * cannot be found to anchor on, the old region rule stands as the fallback.
+     * Null when no count is credible — a reader must not mistake the rows it
      * happened to see for the playlist's size: a virtualized list shows a
-     * window, and the window's size is not a total (ending collection there
-     * is how a long playlist imports as its first screenful).
+     * window, and the window's size is not a total.
      */
     internal fun declaredTotalOrNull(html: String): Int? {
+        val counts = SONG_COUNT.findAll(html)
+            .map { it.range.first to (it.groupValues[1].replace(",", "").toIntOrNull() ?: 0) }
+            .filter { it.second > 0 }.toList()
+        if (counts.isEmpty()) return null
+        val pageName = name(html)
+        if (pageName.isNotBlank()) {
+            val nameAt = ArrayList<Int>()
+            var from = html.indexOf(pageName, ignoreCase = true)
+            while (from >= 0) {
+                nameAt += from
+                from = html.indexOf(pageName, from + 1, ignoreCase = true)
+            }
+            val near = counts.filter { (at, _) -> nameAt.any { abs(it - at) <= NAME_WINDOW } }
+            if (near.isNotEmpty()) return near.maxOf { it.second }
+        }
         val rowsAt = TRACK_LINK.find(html)?.range?.first
         val header = if (rowsAt != null) html.substring(0, rowsAt) else html.take(30_000)
         return SONG_COUNT.findAll(header).lastOrNull()?.groupValues?.get(1)
@@ -470,17 +516,22 @@ class AmazonCollect {
 
 /**
  * When a scroll collection is over, as a decision of its own so it is testable
- * without a phone: the page's declared total is reached, or the list's true
- * bottom has repeated with no new rows across [bottomStallsToEnd] stepped
- * passes running AND a full [bottomQuietMs] of no growth at the bottom. The
- * time half matters as much as the count: a virtualized player loads its next
- * chunk asynchronously, so an apparent bottom can sit empty for several
- * passes while more rows are on their way — ending on the pass count alone
- * concluded collections inside that lazy-load gap. A total the page never
- * declared (null) can only be ended by the bottom rule — the size of the
- * window a virtualized list happens to show is not a total, and treating it
- * as one is how a long playlist imports as its first screenful. [now] is a
- * seam: tests drive the clock.
+ * without a phone: the list's true bottom has repeated with no new rows across
+ * [bottomStallsToEnd] stepped passes running AND a full [bottomQuietMs] of no
+ * growth at the bottom. The time half matters as much as the count: a
+ * virtualized player loads its next chunk asynchronously, so an apparent
+ * bottom can sit empty for several passes while more rows are on their way —
+ * ending on the pass count alone concluded collections inside that lazy-load
+ * gap.
+ *
+ * The page's declared total is NOT a stop rule — it is advisory, sizing only
+ * the summary's "of M". It was one until v29, and a misread total ended real
+ * collections: the page's chrome stated an incidental 10 ahead of an 84-song
+ * header, the reader took 10 as the total, and collection stopped the moment
+ * 10 were held. A total can understate (a rail card's count, a stale header)
+ * as easily as the window's size can masquerade as one, so the bottom rule —
+ * with the session's own pass and time caps behind it — is the only end.
+ * [now] is a seam: tests drive the clock.
  */
 internal class CollectEnd(
     private val bottomStallsToEnd: Int = 3,
@@ -493,10 +544,10 @@ internal class CollectEnd(
     /**
      * Offers one collection pass: [added] rows were new, the list rested
      * [atBottom], the page declares [declaredTotal] songs (null when it states
-     * none) and [collected] are held. True when the collection is over.
+     * none — carried for the caller's summary, never consulted here) and
+     * [collected] are held. True when the collection is over.
      */
     fun offer(added: Int, atBottom: Boolean, declaredTotal: Int?, collected: Int): Boolean {
-        if (declaredTotal != null && declaredTotal > 0 && collected >= declaredTotal) return true
         if (atBottom && added == 0) {
             stalls++
             val since = quietSince ?: now().also { quietSince = it }
@@ -579,6 +630,8 @@ class AmazonReadSession(context: Context, val url: String) {
     private var serializeNote: String? = null
     /** The total the page itself declares, when it declares one; null while it states none. */
     private var lastDeclaredTotal: Int? = null
+    /** The empty-shell reload: attempted at most once per read, and the readout says so. */
+    private var reloaded = false
 
     val webView: WebView = WebView(context).apply {
         settings.javaScriptEnabled = true
@@ -666,6 +719,20 @@ class AmazonReadSession(context: Context, val url: String) {
         stage = AmazonStage.WAITING_FOR_LIST
 
         var page = pollForRows(FIRST_RENDER_MS)
+        if (page == null && lastWall == AmazonWall.NONE && !reloaded && emptyShell()) {
+            // The black-page case (seen on a phone: the import sat on an empty
+            // black page area until it failed): Amazon served the bare app
+            // shell and the list never rendered — no rows, no wall, almost no
+            // page at all. One reload is the whole remedy attempted, once; the
+            // readout records that it happened.
+            reloaded = true
+            lastPoll = "empty shell (no rows, no wall, ${lastHtmlBytes ?: 0} bytes read): reloading once"
+            loadGate = CompletableDeferred()
+            webView.reload()
+            withTimeoutOrNull(LOAD_TIMEOUT_MS) { loadGate?.await() }
+            if (phase == Phase.CANCELLED) return
+            page = pollForRows(SECOND_RENDER_MS)
+        }
         if (page == null && lastWall != AmazonWall.NONE) {
             // A wall a tap can clear: a bot check, or Amazon asking for a sign-in —
             // a playlist that is not public shows nothing until its owner signs in.
@@ -692,9 +759,10 @@ class AmazonReadSession(context: Context, val url: String) {
      * advances a screen at a time and every resting place is read; a jump to
      * the bottom would skip the middle rows' rendering entirely, and they
      * would never be collected (a long playlist importing as a handful of
-     * songs). [CollectEnd] decides when it is over: the total the page itself
-     * declares, or the true bottom repeating empty — never the size of the
-     * window that happened to be showing.
+     * songs). [CollectEnd] decides when it is over: the true bottom repeating
+     * empty through its quiet window — never the size of the window that
+     * happened to be showing, and never the total the page declares (advisory
+     * only: it sizes the summary, it stops nothing).
      */
     private suspend fun collect(first: AmazonDom.Page) {
         val collect = AmazonCollect()
@@ -748,10 +816,19 @@ class AmazonReadSession(context: Context, val url: String) {
             wall = lastWall,
             loadOutcome = loadOutcome,
             lastPoll = lastPoll,
+            reloaded = reloaded,
         )
         stage = AmazonStage.FAILED
         phase = Phase.FAILED
     }
+
+    /**
+     * The page the first poll read was an empty shell: nothing of it could be
+     * read at all, or what could be read is far smaller than any rendered
+     * playlist page (those run to hundreds of kilobytes once the list renders;
+     * the bare app shell Amazon sometimes answers with is a few).
+     */
+    private fun emptyShell(): Boolean = lastHtml == null || (lastHtmlBytes ?: 0) < SHELL_MAX_BYTES
 
     /** Polls the rendering page until its rows appear or [withinMs] runs out. */
     private suspend fun pollForRows(withinMs: Long): AmazonDom.Page? {
@@ -768,7 +845,11 @@ class AmazonReadSession(context: Context, val url: String) {
             lastHtml = html
             val parsed = withContext(Dispatchers.Default) { AmazonDom.parse(html) }
             if (parsed.name.isNotBlank()) pageTitle = parsed.name
-            AmazonDom.declaredTotalOrNull(html)?.let { lastDeclaredTotal = it }
+            // The largest credible total seen anywhere in the read is the
+            // summary's: a later, fuller serialization must be able to outvote
+            // an early page whose header had not rendered (or rendered a rail
+            // card's count) — never the other way round.
+            AmazonDom.declaredTotalOrNull(html)?.let { d -> lastDeclaredTotal = maxOf(lastDeclaredTotal ?: 0, d) }
             lastPoll = "poll $polls: ${parsed.rows.size} rows"
             if (parsed.rows.isNotEmpty()) {
                 foundCount = parsed.rows.size
@@ -824,6 +905,8 @@ class AmazonReadSession(context: Context, val url: String) {
         const val COLLECT_CAP_MS = 120_000L
         const val EVAL_TIMEOUT_MS = 10_000L
         const val POLL_MS = 1_200L
+        /** A first read smaller than this is the bare app shell, not a rendered page. */
+        const val SHELL_MAX_BYTES = 20_000
         const val SCROLL_SETTLE_MS = 1_100L
         const val MAX_SCROLL_PASSES = 120
         const val SERIALIZE_ERROR = "__SERIALIZE_ERROR__:"

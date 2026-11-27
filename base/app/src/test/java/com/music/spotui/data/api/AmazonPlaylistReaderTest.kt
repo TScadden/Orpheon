@@ -137,6 +137,9 @@ class AmazonPlaylistReaderTest {
         assertTrue(readout(wall = AmazonWall.NONE).text().contains("wall: neither"))
         assertTrue(readout(wall = AmazonWall.CAPTCHA).text().contains("wall: captcha"))
         assertTrue(readout(htmlBytes = 12_345).text().contains("html size: 12345 bytes"))
+        // The empty-shell reload is recorded, so a failure after one says so.
+        assertTrue(text.contains("reloaded once: no"))
+        assertTrue(readout().copy(reloaded = true).text().contains("reloaded once: yes"))
     }
 
     @Test fun statusStagesFollowTheReadsFacts() {
@@ -215,9 +218,13 @@ class AmazonPlaylistReaderTest {
         assertEquals("https://m.media-amazon.com/images/I/51too.jpg", done.coverUrl)
     }
 
-    @Test fun collectionEndsAtTheDeclaredTotalOrTheTrueBottomNeverTheWindow() {
-        // The declared total reached: over, however the passes looked.
-        assertTrue(CollectEnd().offer(added = 3, atBottom = false, declaredTotal = 10, collected = 10))
+    @Test fun collectionEndsOnlyAtTheTrueBottomNeverTheDeclaredTotalNorTheWindow() {
+        // The declared total reached mid-list: NOT over (v29). The total is
+        // advisory — it sizes the summary's "of M" and stops nothing — because
+        // a misread total ended real collections: an incidental 10 read as an
+        // 84-song playlist's total stopped the read the moment 10 were held.
+        assertFalse(CollectEnd().offer(added = 3, atBottom = false, declaredTotal = 10, collected = 10))
+        assertFalse(CollectEnd().offer(added = 0, atBottom = false, declaredTotal = 84, collected = 84))
         // New rows at the bottom: not over.
         assertFalse(CollectEnd().offer(added = 2, atBottom = true, declaredTotal = null, collected = 5))
         // No new rows away from the bottom: not over, however often it repeats.
@@ -324,6 +331,63 @@ class AmazonPlaylistReaderTest {
         assertEquals(0, ReadSummary.of(found = 10, declared = null).shortBy)
         // A page that understates itself never makes the read "short".
         assertFalse(ReadSummary.of(found = 90, declared = 84).isShort)
+    }
+
+    @Test fun theHeaderBlockIsNeverReadAsTheFirstSong() {
+        // The shape of Tyson's v28 import: the playlist header presents itself
+        // as a row-shaped block (a "track" test id, a labelled title slot)
+        // whose title is the count line and whose artist is the playlist's top
+        // credit. It imported as a junk first song titled "84 SONGS", ahead of
+        // the real first track. The header is furniture, never a song — in the
+        // row-element reading that produced it and at the parse's final gate.
+        val html = """
+            <html><head><title>Amazon Music: Hype Playlist</title>
+            <meta property="og:title" content="Hype Playlist on Amazon Music"></head><body>
+            <div data-testid="track-header" class="header-block" data-asin="B0HEADER01">
+              <span class="t-title">84 SONGS</span>
+              <a href="/artists/B0ARTIST01">The Kid LAROI</a>
+            </div>
+            <div class="tracklist">
+              <a href="/albums/B0ALBUM001?trackAsin=B0TRACK001">SORRY</a>
+              <a href="/artists/B0ARTIST01">The Kid LAROI</a>
+              <span>THE FIRST TIME</span><span>3:24</span>
+              <a href="/albums/B0ALBUM002?trackAsin=B0TRACK002">BLEED</a>
+              <a href="/artists/B0ARTIST01">The Kid LAROI</a>
+              <span>THE FIRST TIME</span><span>2:57</span>
+            </div>
+            </body></html>
+        """.trimIndent()
+        val page = AmazonDom.parse(html)
+        assertEquals(listOf("SORRY", "BLEED"), page.rows.map { it.title })
+        assertFalse(page.rows.any { AmazonDom.isCountLine(it.title) })
+        assertEquals("B0TRACK001", page.rows[0].asin)
+    }
+
+    @Test fun theTenOfTenLieCannotStand() {
+        // The shape of Tyson's v29-morning re-import: a rail card's "10 songs"
+        // stands ahead of the first row link, and the playlist's own header —
+        // its name and its "84 SONGS" — renders after that link (the player's
+        // hero block links the first track early). The old region rule read
+        // only what stood before the first link and declared 10, so the
+        // confirm step said "10 of 10 songs read" over a short read and no
+        // shortfall showed. The header's count, anchored on the playlist's own
+        // name, outvotes the rail's: the summary's M is 84, and a 10-song read
+        // of it states its shortfall plainly.
+        val html = """
+            <html><head><title>Amazon Music: Hype Playlist</title>
+            <meta property="og:title" content="Hype Playlist on Amazon Music"></head><body>
+            <nav><div class="rail-card">Road Trip Mix · 10 songs</div></nav>
+            <div class="hero"><a href="/albums/B0ALBUM001?trackAsin=B0TRACK001">SORRY</a></div>
+            <header class="playlist-header"><h1>Hype Playlist</h1><div class="meta">84 SONGS • 4 HOURS 16 MINUTES</div></header>
+            <div class="tracklist">
+              <a href="/albums/B0ALBUM002?trackAsin=B0TRACK002">BLEED</a>
+            </div>
+            </body></html>
+        """.trimIndent()
+        assertEquals(84, AmazonDom.declaredTotalOrNull(html))
+        val summary = ReadSummary.of(found = 10, declared = AmazonDom.declaredTotalOrNull(html))
+        assertTrue(summary.isShort)
+        assertEquals(74, summary.shortBy)
     }
 
     @Test fun aPageDeclaresItsTotalOnlyWhenItStatesOne() {

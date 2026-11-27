@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.SortByAlpha
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Analytics
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.ThumbDownOffAlt
@@ -96,6 +97,17 @@ fun ImmersiveSongOptionsSheet(
     var showNerd by remember { mutableStateOf(false) }
     var showQuality by remember { mutableStateOf(false) }
     var showDevices by remember { mutableStateOf(false) }
+    var showPlayDebug by remember { mutableStateOf(false) }
+    // An imported playlist's row (the page passed its playlist's id): the Play debug
+    // sheet reads the stored row behind this model (kept until the import saga closes).
+    val importedRow = remember(song.rowUid, currentPlaylistId) {
+        currentPlaylistId?.let { com.music.spotui.data.local.ImportedPlaylists.get(it) }
+            ?.items?.firstOrNull { it.key == song.rowUid }
+    }
+    if (showPlayDebug && importedRow != null) {
+        com.music.spotui.ui.PlayDebugSheet(row = importedRow, onDismiss = { showPlayDebug = false; onDismiss() })
+        return
+    }
     if (showQuality) { com.music.spotui.ui.components.QualitySheet(onDismiss = { showQuality = false; onDismiss() }); return }
     if (showDevices) { com.music.spotui.ui.components.DevicesSheet(onDismiss = { showDevices = false; onDismiss() }); return }
     if (showNerd) { com.music.spotui.ui.components.StatsForNerdsSheet(onDismiss = { showNerd = false; onDismiss() }); return }
@@ -222,6 +234,12 @@ fun ImmersiveSongOptionsSheet(
             playerViewModel.goToArtist(song.spotifyTrackId, song.singer) { route -> navController.navigate(route) }
         }
         ImmersiveSheetRow(Icons.Rounded.Info, stringResource(R.string.track_credits), enabled = hasId) { showCredits = true }
+        // DIAGNOSTIC (v29): an imported row's play receipt — stored identity, the
+        // TrackInfo a tap builds, what each source answered. Out when Tyson says
+        // the import saga is closed (see ui/PlayDebug.kt).
+        if (importedRow != null) {
+            ImmersiveSheetRow(Icons.Rounded.BugReport, "Play debug") { showPlayDebug = true }
+        }
         if (nowPlaying && hasId && !song.url.startsWith("episode:")) {
             if (com.music.spotui.data.preferences.GeniusPref.on)
                 ImmersiveSheetRow(Icons.Rounded.Lightbulb, stringResource(R.string.lyrics_meaning_title)) { showMeaning = true }

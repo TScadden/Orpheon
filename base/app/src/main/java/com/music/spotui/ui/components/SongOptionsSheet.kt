@@ -44,6 +44,7 @@ import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Analytics
+import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.ThumbDownOffAlt
@@ -112,6 +113,17 @@ fun SongOptionsSheet(
     var showSpeed by remember { mutableStateOf(false) }
     var showNerd by remember { mutableStateOf(false) }
     var showQuality by remember { mutableStateOf(false) }
+    var showPlayDebug by remember { mutableStateOf(false) }
+    // An imported playlist's row (the page passed its playlist's id): the Play debug
+    // sheet reads the stored row behind this model (kept until the import saga closes).
+    val importedRow = remember(song.rowUid, currentPlaylistId) {
+        currentPlaylistId?.let { com.music.spotui.data.local.ImportedPlaylists.get(it) }
+            ?.items?.firstOrNull { it.key == song.rowUid }
+    }
+    if (showPlayDebug && importedRow != null) {
+        com.music.spotui.ui.PlayDebugSheet(row = importedRow, onDismiss = { showPlayDebug = false; onDismiss() })
+        return
+    }
     if (showNerd) {
         StatsForNerdsSheet(onDismiss = { showNerd = false; onDismiss() })
         return
@@ -279,6 +291,12 @@ fun SongOptionsSheet(
                 playerViewModel.goToArtist(song.spotifyTrackId, song.singer) { route -> navController.navigate(route) }
             }
             MenuRow(Icons.Outlined.Info, stringResource(R.string.track_credits), enabled = hasId) { showCredits = true }
+            // DIAGNOSTIC (v29): an imported row's play receipt — stored identity, the
+            // TrackInfo a tap builds, what each source answered. Out when Tyson says
+            // the import saga is closed (see ui/PlayDebug.kt).
+            if (importedRow != null) {
+                MenuRow(Icons.Outlined.BugReport, "Play debug") { showPlayDebug = true }
+            }
             // "Not interested": kept on this phone only; the song leaves the queue and lists skip it.
             if (hasId && episodeKey == null) {
                 val hidden = com.music.spotui.data.preferences.HiddenSongs.isHidden(song.spotifyTrackId)

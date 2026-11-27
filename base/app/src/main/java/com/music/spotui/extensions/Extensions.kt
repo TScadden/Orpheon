@@ -703,6 +703,10 @@ object Extensions {
     /** The audio-source extensions on at launch are still being started. */
     fun starting(): Boolean = !audioStarted.isCompleted
 
+    /** The installed extensions granted as audio sources (on or off), for the Play debug sheet. */
+    fun audioSources(): List<InstalledExtension> =
+        _registry.value.extensions.filter { Action.AUDIO_SOURCE.key in it.granted }
+
     /** Waits up to [ms] for the audio-source extensions on at launch to be started; true once they are. */
     suspend fun awaitStarted(ms: Long): Boolean = audioStarted.isCompleted || withTimeoutOrNull(ms) { audioStarted.await() } != null
 

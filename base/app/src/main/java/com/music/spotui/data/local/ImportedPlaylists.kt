@@ -21,10 +21,12 @@ import java.util.UUID
  * A song whose source is not Spotify (an Amazon Music link, a playlist file) has no
  * Spotify track id: [spotifyTrackId] is "" and the row is identified by its own key and,
  * where the source stated one, its [asin]. Such a row plays under the catalog identity
- * the import's completion attached to it ([catalogKey]) — the audio-source extensions
- * are only ever asked for a song by an id (a Spotify id, or a catalog key like
- * "deezer.3135556"), so a row carrying neither cannot be played at all, however clean
- * its title and artist read. It never plays by a Spotify id it does not have.
+ * the import's completion attached to it ([catalogKey]) — the app asks the extensions
+ * about a song under an id (a Spotify id, or a catalog key like "deezer.3135556") and
+ * refuses a row carrying neither, however clean its title and artist read. It never
+ * plays by a Spotify id it does not have. The extensions themselves then resolve the
+ * song from the ask's metadata — title, artist, duration — so the row's [durationMs]
+ * is a playability field too, not display data (see [playId]).
  */
 data class ImportedSong(
     val key: String,
@@ -62,10 +64,14 @@ data class ImportedSong(
 
     /**
      * The id this song is played under: its Spotify id when it has one, else the
-     * catalog key its completion attached. Blank: the row carries no identity any
-     * source can be asked by, so it cannot play — the extensions' audio hook is
-     * addressed by id alone (ExtensionAudio.playList refuses a blank one outright,
-     * which is where an Amazon row with a clean title and no identity used to die).
+     * catalog key its completion attached. Blank: the row carries no identity the
+     * app will ask the extensions by at all (ExtensionAudio.playList refuses a
+     * blank one outright, which is where an Amazon row with a clean title and no
+     * identity used to die). An identity alone is not playability, though: the
+     * extensions resolve the song by the metadata the ask carries — title, artist
+     * and duration — and a row whose duration was never filled is refused by the
+     * hooks themselves (see CatalogCompletion's doc), which is why the completion
+     * fills a missing duration under the same bar as the identity.
      */
     val playId: String get() = spotifyTrackId.ifBlank { catalogKey }
 }
@@ -261,13 +267,17 @@ object ImportedPlaylists {
                     val isrc = if (s.isrc.isBlank()) fresh.isrc else s.isrc
                     val cover = if (s.coverUrl.isBlank()) fresh.coverUrl else s.coverUrl
                     val album = if (s.album.isBlank()) fresh.album else s.album
+                    // A duration the stored row lacks (an embed-only reading states
+                    // none) takes the fresh reading's: the audio hooks refuse a
+                    // duration-less track, so a repaired row must not stay one.
+                    val duration = if (s.durationMs > 0) s.durationMs else fresh.durationMs
                     // An unjudged song takes the reading's judgement; a stated one stands.
                     val explicit = if (s.explicit == app.myspoti.api.Explicitness.UNKNOWN) fresh.explicit else s.explicit
-                    if (isrc == s.isrc && cover == s.coverUrl && album == s.album && explicit == s.explicit) s
+                    if (isrc == s.isrc && cover == s.coverUrl && album == s.album && explicit == s.explicit && duration == s.durationMs) s
                     else {
                         changed = true
                         repaired += s.spotifyTrackId
-                        s.copy(isrc = isrc, coverUrl = cover, album = album, explicit = explicit)
+                        s.copy(isrc = isrc, coverUrl = cover, album = album, explicit = explicit, durationMs = duration)
                     }
                 }
                 if (changed) playlists[id] = p.copy(items = items)
@@ -279,15 +289,18 @@ object ImportedPlaylists {
     /**
      * Completes a stored playlist's songs from a catalog completion pass,
      * [completedByKey] (row key → the pass's row of it): the ISRC, the cover, the
-     * album name, the explicitness and the catalog key are filled wherever the
-     * stored song lacks them — a field the stored song already carries is never
-     * overwritten, a song the pass does not know is left as it is, and the list
-     * itself never changes. [repair]'s sibling for the playlists that repair
-     * cannot reach: a Spotify repair re-reads by Spotify track id, but an Amazon
-     * or file import's rows have none — they are completed from the catalog
-     * instead, matched by their own row keys, and the catalog key the pass
-     * attaches is the identity those rows play under (see [ImportedSong.playId]).
-     * Returns the row keys of the songs this pass completed in any field.
+     * album name, the duration, the explicitness and the catalog key are filled
+     * wherever the stored song lacks them — a field the stored song already
+     * carries is never overwritten, a song the pass does not know is left as it
+     * is, and the list itself never changes. [repair]'s sibling for the playlists
+     * that repair cannot reach: a Spotify repair re-reads by Spotify track id,
+     * but an Amazon or file import's rows have none — they are completed from
+     * the catalog instead, matched by their own row keys, and the catalog key
+     * the pass attaches is the identity those rows play under (see
+     * [ImportedSong.playId]); the duration it fills is what the audio hooks
+     * resolve by, and a row that never received one stayed unplayable however
+     * complete its other fields read. Returns the row keys of the songs this
+     * pass completed in any field.
      */
     fun complete(id: String, completedByKey: Map<String, ImportedSong>): Set<String> {
         val done = LinkedHashSet<String>()
@@ -299,15 +312,16 @@ object ImportedPlaylists {
                     val isrc = if (s.isrc.isBlank()) fresh.isrc else s.isrc
                     val cover = if (s.coverUrl.isBlank()) fresh.coverUrl else s.coverUrl
                     val album = if (s.album.isBlank()) fresh.album else s.album
+                    val duration = if (s.durationMs > 0) s.durationMs else fresh.durationMs
                     val explicit = if (s.explicit == app.myspoti.api.Explicitness.UNKNOWN) fresh.explicit else s.explicit
                     val catalogKey = if (s.catalogKey.isBlank()) fresh.catalogKey else s.catalogKey
                     if (isrc == s.isrc && cover == s.coverUrl && album == s.album &&
-                        explicit == s.explicit && catalogKey == s.catalogKey
+                        explicit == s.explicit && catalogKey == s.catalogKey && duration == s.durationMs
                     ) s
                     else {
                         changed = true
                         done += s.key
-                        s.copy(isrc = isrc, coverUrl = cover, album = album, explicit = explicit, catalogKey = catalogKey)
+                        s.copy(isrc = isrc, coverUrl = cover, album = album, explicit = explicit, catalogKey = catalogKey, durationMs = duration)
                     }
                 }
                 if (changed) playlists[id] = p.copy(items = items)
