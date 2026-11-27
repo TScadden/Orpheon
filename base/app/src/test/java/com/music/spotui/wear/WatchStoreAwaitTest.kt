@@ -20,18 +20,25 @@ import java.io.File
  * process (a watch pull is often what wakes the phone app) the exposed set read empty
  * or partial, and a file the phone has was answered "gone", or Liked Songs came back
  * short. awaitLoaded is the contract the answers now rely on: when it returns, the
- * file's content IS the store's state. Each store is touched cold exactly once here —
- * its first touch in this class is the fixture's.
+ * file's content IS the store's state.
  *
- * The qualifiers in the config are this class's own on purpose: Robolectric classes
- * sharing a config share a sandbox, and with it the stores' singletons — an earlier
- * class (OnboardingTest) inits them against its own data dir and loads them empty,
- * which would leave these tests reading a store that can never see the fixture. A
- * config of its own is a cold process of its own, the state under test.
+ * Robolectric classes sharing a config share a sandbox, and with it the stores'
+ * singletons: an earlier class (OnboardingTest) inits them against its own data dir
+ * and loads them empty, and a store init'd once can never be init'd again. So each
+ * test first puts its store back to the state a cold process starts in — the file
+ * this test wrote, nothing loaded, nothing in memory — and only then walks the
+ * production path (init, then the await).
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], application = android.app.Application::class, qualifiers = "w411dp-h891dp")
+@Config(sdk = [35], application = android.app.Application::class)
 class WatchStoreAwaitTest {
+
+    /** [store] back to a cold process's start, its file the one at [file] (see the class doc). */
+    private fun cold(store: Any, file: File) {
+        val cls = store.javaClass
+        cls.getDeclaredField("file").apply { isAccessible = true }.set(store, file)
+        cls.getDeclaredField("loaded").apply { isAccessible = true }.setBoolean(store, false)
+    }
 
     @Test fun likedFilesAreThereWhenTheAwaitReturns() {
         val app = RuntimeEnvironment.getApplication()
@@ -39,7 +46,10 @@ class WatchStoreAwaitTest {
             key = "k1", uri = "content://media/external/audio/media/42", title = "Liked Song",
             artist = "Artist", album = "Album", durationMs = 123_000L, artUri = "",
         )
-        File(app.filesDir, "local_likes.json").writeText(LocalLikes.encode(listOf(item)))
+        val file = File(app.filesDir, "local_likes.json")
+        file.writeText(LocalLikes.encode(listOf(item)))
+        cold(LocalLikes, file)
+        LocalLikes.items.clear()
         LocalLikes.init(app)
         LocalLikes.awaitLoaded()
         assertEquals(listOf(item), LocalLikes.items.toList())
@@ -54,7 +64,10 @@ class WatchStoreAwaitTest {
             .put("cover", "").put("items", JSONArray().put(item))
         val root = JSONObject().put("version", 1).put("playlists", JSONArray().put(list))
             .put("additions", JSONObject())
-        File(app.filesDir, "local_playlists.json").writeText(root.toString())
+        val file = File(app.filesDir, "local_playlists.json")
+        file.writeText(root.toString())
+        cold(LocalPlaylists, file)
+        LocalPlaylists.playlists.clear()
         LocalPlaylists.init(app)
         LocalPlaylists.awaitLoaded()
         val p = LocalPlaylists.playlists.getValue("lp1")
