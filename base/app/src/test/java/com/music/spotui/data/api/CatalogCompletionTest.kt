@@ -167,4 +167,108 @@ class CatalogCompletionTest {
         val out = CatalogCompletion.complete(listOf(song()), CatalogCompletion.Gatherer { throw RuntimeException("down") })
         assertEquals(song(), out[0])
     }
+
+    @Test fun primaryCreditTakesTheHeadOfACredit() {
+        assertEquals("The Kid LAROI", CatalogCompletion.primaryCredit("The Kid LAROI [feat. Youngboy Never Broke Again]"))
+        assertEquals("The Kid LAROI", CatalogCompletion.primaryCredit("The Kid LAROI (feat. Youngboy Never Broke Again)"))
+        assertEquals("The Kid LAROI", CatalogCompletion.primaryCredit("The Kid LAROI feat. Youngboy Never Broke Again"))
+        assertEquals("Old Sea Brigade", CatalogCompletion.primaryCredit("Old Sea Brigade, Amanda Bergman"))
+        assertEquals("The Testers", CatalogCompletion.primaryCredit("The Testers"))
+    }
+
+    @Test fun aFeaturingCreditCompletesOnItsPrimaryArtist() = runBlocking {
+        // The shape of Tyson's unplayable "CALL ME INSTEAD": an Amazon row (no
+        // Spotify id, no duration — the phone's page states none) whose artist
+        // credit carries a bracketed guest. The catalog's hit names the head
+        // artist and the guest as its two artists. The full-credit comparisons
+        // could never join them — Match.artistFit caps a contained name at 0.9,
+        // short of full marks — so the row stayed thin and unplayable while
+        // single-artist rows completed. The primary comparison joins them, and
+        // the row completes whole: duration, ISRC, and the key it plays under.
+        val row = ImportedSong("k", "", "CALL ME INSTEAD", "The Kid LAROI [feat. Youngboy Never Broke Again]", "", 0L, "")
+        val hit = CatalogCompletion.Candidate(
+            title = "CALL ME INSTEAD", artists = listOf("The Kid LAROI", "YoungBoy Never Broke Again"),
+            album = "THE FIRST TIME", coverUrl = "https://img/call.jpg", durationMs = 222_000L,
+            isrc = "USRC12300001", catalogKey = "deezer.222",
+        )
+        assertTrue(CatalogCompletion.accepted(row, hit))
+        val out = CatalogCompletion.complete(listOf(row), CatalogCompletion.Gatherer { listOf(hit) }).single()
+        assertEquals(222_000L, out.durationMs)
+        assertEquals("USRC12300001", out.isrc)
+        assertEquals("deezer.222", out.catalogKey)
+        assertEquals("deezer.222", out.playId)
+        // The same hit with the whole credit stated as one entry completes too.
+        val combined = hit.copy(artists = listOf("The Kid LAROI, YoungBoy Never Broke Again"))
+        assertTrue(CatalogCompletion.accepted(row, combined))
+    }
+
+    @Test fun aDuetCreditCompletesOnItsPrimaryArtist() = runBlocking {
+        // "Rest Assured" (Sad playlist): a duet credit against a catalog entry
+        // naming both singers. Neither name alone equals the full credit, and
+        // the fit caps at 0.9 — the row never matched under the old bar either.
+        // The heads agree, and that is identity enough with the title exact.
+        val row = ImportedSong("k", "", "Rest Assured", "Old Sea Brigade, Amanda Bergman", "", 0L, "")
+        val hit = CatalogCompletion.Candidate(
+            title = "Rest Assured", artists = listOf("Old Sea Brigade", "Amanda Bergman"),
+            album = "Ode to a Friend", coverUrl = "https://img/rest.jpg", durationMs = 231_000L,
+            isrc = "USRC12300002", catalogKey = "deezer.333",
+        )
+        assertTrue(CatalogCompletion.accepted(row, hit))
+        val out = CatalogCompletion.complete(listOf(row), CatalogCompletion.Gatherer { listOf(hit) }).single()
+        assertEquals(231_000L, out.durationMs)
+        assertEquals("USRC12300002", out.isrc)
+        assertEquals("deezer.333", out.playId)
+    }
+
+    @Test fun aDifferentPrimaryArtistStillRefuses() {
+        // The guest alone is not the head: a hit credited only to the featured
+        // artist is another recording of the title, however close the rest —
+        // the primary widening is shape tolerance, never identity tolerance.
+        val row = ImportedSong("k", "", "CALL ME INSTEAD", "The Kid LAROI [feat. Youngboy Never Broke Again]", "", 0L, "")
+        val guestOnly = CatalogCompletion.Candidate(
+            title = "CALL ME INSTEAD", artists = listOf("YoungBoy Never Broke Again"),
+            album = "AI YoungBoy", coverUrl = "https://img/x.jpg", durationMs = 222_000L, isrc = "",
+        )
+        assertFalse(CatalogCompletion.accepted(row, guestOnly))
+        // And a different head act altogether, in the same duet shape.
+        val stranger = guestOnly.copy(artists = listOf("Old Sea Brigade, Amanda Bergman"))
+        assertFalse(CatalogCompletion.accepted(row, stranger))
+    }
+
+    @Test fun anOutvotedDurationIsReplacedByTheAgreeingHits() = runBlocking {
+        // The stored row states 90 s (a wrong value — a preview's length, a
+        // garbled read); the catalog's providers agree the recording is 200 s.
+        // No candidate corroborates the row's value and two agree with each
+        // other against it: the duration counts as unfilled and the accepted
+        // hit's replaces it, everything else filling as usual.
+        val wrong = song(durationMs = 90_000)
+        val a = hit(durationMs = 200_000, coverUrl = "https://img/a.jpg")
+        val b = hit(durationMs = 200_000, coverUrl = "https://img/b.jpg")
+        val out = CatalogCompletion.complete(listOf(wrong), CatalogCompletion.Gatherer { listOf(a, b) }).single()
+        assertEquals(200_000L, out.durationMs)
+        assertEquals("https://img/a.jpg", out.coverUrl)
+        assertEquals("USRC10000001", out.isrc)
+    }
+
+    @Test fun aCorroboratedDurationStandsAgainstAnAgreeingPair() = runBlocking {
+        // The row states 200 s and one hit corroborates it; two others agree
+        // with each other on 260 s (a longer cut of the same title). The
+        // corroborated value governs: the ordinary bar picks the corroborating
+        // hit, and the stated duration is never replaced.
+        val stated = song(durationMs = 200_000)
+        val real = hit(durationMs = 205_000, coverUrl = "https://img/real.jpg")
+        val long1 = hit(durationMs = 260_000, coverUrl = "https://img/l1.jpg")
+        val long2 = hit(durationMs = 261_000, coverUrl = "https://img/l2.jpg")
+        val out = CatalogCompletion.complete(listOf(stated), CatalogCompletion.Gatherer { listOf(long1, real, long2) }).single()
+        assertEquals("https://img/real.jpg", out.coverUrl)
+        assertEquals(200_000L, out.durationMs)
+    }
+
+    @Test fun aLoneContradictingCandidateNeverOutvotesAStatedDuration() = runBlocking {
+        // One hit, 60 s longer than the row states: as likely another recording
+        // as a wrong row. It refuses, and the song is left exactly as it was.
+        val stated = song(durationMs = 200_000)
+        val out = CatalogCompletion.complete(listOf(stated), CatalogCompletion.Gatherer { listOf(hit(durationMs = 260_000)) }).single()
+        assertEquals(stated, out)
+    }
 }

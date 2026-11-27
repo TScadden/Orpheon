@@ -28,13 +28,33 @@ import kotlin.math.abs
  *  - a song carrying an ISRC is completed from the ISRC-exact hit when a provider has one
  *    (the chain's own resolve asks every provider by ISRC first; Deezer and MusicBrainz
  *    answer ISRC lookups), and such a hit is accepted on the ISRC alone;
- *  - any other hit must match on the normalized title AND the artist (the catalog's own
- *    [Match] normalization and artist fit at full marks), and, when both durations are
- *    known, its duration must sit inside the downloads' own length tolerances
- *    ([OfflineDownloader.lengthMismatch]: no more than 5 s short, 15 s long);
+ *  - any other hit must match on the normalized title AND the artist, and, when both
+ *    durations are known, its duration must sit inside the downloads' own length
+ *    tolerances ([OfflineDownloader.lengthMismatch]: no more than 5 s short, 15 s long);
  *  - everything looser is rejected and the field stays blank.
  *
- * Only blanks are ever filled — a field a song already carries is never overwritten — and
+ * The artist half of the bar compares PRIMARY artists (see [primaryCredit]): the head
+ * of each credit, with bracketed or trailing featuring credits stripped, both sides
+ * normalized the same way. It has to: a guest credit defeats the full-credit
+ * comparisons even when the head artist is identical — [Match.artistFit] caps a
+ * contained name at 0.9, so "The Kid LAROI [feat. Youngboy Never Broke Again]" never
+ * reached full marks against a plain "The Kid LAROI", and a duet credit ("Old Sea
+ * Brigade, Amanda Bergman") never equalled either of its two names. Those rows
+ * stayed thin forever — no duration, no identity, unplayable — while single-artist
+ * rows completed. The primary comparison widens the credit's SHAPE tolerance only:
+ * a different head artist still refuses, and the title and duration bars are
+ * exactly as strict as they were.
+ *
+ * One duration exception, narrowly fenced: a stored duration that NO strict
+ * title-and-primary-artist candidate corroborates, while two or more of those
+ * candidates agree with EACH OTHER on a different duration, counts as unfilled —
+ * the agreeing hits outvote the row's own value, and the accepted hit's duration
+ * replaces it. A lone contradicting candidate never outvotes a stated duration
+ * (it is as likely a different recording as a wrong row), and a duration any
+ * candidate corroborates is never overwritten.
+ *
+ * Only blanks are ever filled — a field a song already carries is never overwritten,
+ * with the single fenced exception of an outvoted duration (below) — and
  * the list itself never changes: same songs, same order. A song the catalog cannot answer
  * for (or a lookup that fails) is left exactly as it was.
  *
@@ -112,6 +132,21 @@ object CatalogCompletion {
 
     /** Whether [c] may complete [song], under the strict bar in the class doc. */
     fun accepted(song: ImportedSong, c: Candidate): Boolean {
+        if (!acceptedIgnoringDuration(song, c)) return false
+        // The duration bar: a hit whose length contradicts a stated duration is
+        // another recording (a longer cut, a live take) until the agreement rule
+        // in [pick] says the row's own value is the wrong one. An ISRC-exact hit
+        // is an identity, not a match, and is exempt: it stands on the ISRC alone.
+        val wanted = Match.isrc(song.isrc)
+        if (wanted != null && Match.isrc(c.isrc) == wanted) return true
+        if (song.durationMs > 0 && c.durationMs > 0 &&
+            OfflineDownloader.lengthMismatch(c.durationMs / 1000, song.durationMs) != null
+        ) return false
+        return true
+    }
+
+    /** [accepted] without the duration bar: the title and the artist alone. */
+    private fun acceptedIgnoringDuration(song: ImportedSong, c: Candidate): Boolean {
         val wanted = Match.isrc(song.isrc)
         if (wanted != null && Match.isrc(c.isrc) == wanted) return true
         // A misread row is refused whatever the catalog offers. An ISRC-exact hit
@@ -121,33 +156,100 @@ object CatalogCompletion {
         val title = Match.title(song.title)
         if (title.isEmpty() || title != Match.title(c.title)) return false
         if (!artistMatches(song.artist, c.artists)) return false
-        if (song.durationMs > 0 && c.durationMs > 0 &&
-            OfflineDownloader.lengthMismatch(c.durationMs / 1000, song.durationMs) != null
-        ) return false
         return true
     }
 
-    /** The full credit written the same, or the artist fit at full marks. */
+    /**
+     * The candidates that outvote a wrong stored duration: strict title-and-artist
+     * hits (the duration bar aside) whose stated durations agree with EACH OTHER
+     * inside the length tolerances while the stored value agrees with none of
+     * them. Two or more independent hits stating the same different length are
+     * the recording telling on the row; a lone contradictor proves nothing and
+     * never outvotes. Null when there is no such agreement — including whenever
+     * some candidate already corroborates the stored duration (then the ordinary
+     * bar governs and the stated duration stands).
+     */
+    private fun agreeingCluster(song: ImportedSong, candidates: List<Candidate>): List<Candidate>? {
+        if (song.durationMs <= 0) return null
+        if (candidates.any { accepted(song, it) }) return null
+        val relaxed = candidates.filter { acceptedIgnoringDuration(song, it) && it.durationMs > 0 }
+        if (relaxed.size < 2) return null
+        var best: List<Candidate>? = null
+        for (c in relaxed) {
+            val group = relaxed.filter {
+                OfflineDownloader.lengthMismatch(it.durationMs / 1000, c.durationMs) == null
+            }
+            if (group.size >= 2 && (best == null || group.size > best!!.size)) best = group
+        }
+        return best
+    }
+
+    /** The full credit written the same, the primary artists equal, or the artist fit at full marks. */
     private fun artistMatches(credit: String, artists: List<String>): Boolean {
         val wanted = Match.name(credit)
         if (wanted.isEmpty() || artists.isEmpty()) return false
         if (artists.any { Match.name(it) == wanted }) return true
+        // The primary comparison: the head of the song's credit against the head of
+        // any of the hit's artist entries (a provider may state the whole credit as
+        // one entry, or list the guest first — the head of an entry is still a head).
+        val primary = Match.name(primaryCredit(credit))
+        if (primary.isNotEmpty() && artists.any { Match.name(primaryCredit(it)) == primary }) return true
         return Match.artistFit(credit, artists) >= 1.0
+    }
+
+    private val FEATURING_BRACKETED = Regex("\\s*[\\[(]\\s*(feat\\.?|ft\\.?|featuring)\\b[^)\\]]*[)\\]]", RegexOption.IGNORE_CASE)
+    private val FEATURING_PLAIN = Regex("\\s+(feat\\.?|ft\\.?|featuring)\\s+.*$", RegexOption.IGNORE_CASE)
+    private val CREDIT_HEAD_SPLIT = Regex("\\s*(?:,|;|&|\\+)\\s*|\\s+and\\s+", RegexOption.IGNORE_CASE)
+
+    /**
+     * A credit's primary artist, as written: the featuring credits removed
+     * ("The Kid LAROI [feat. Youngboy Never Broke Again]" → "The Kid LAROI",
+     * "A feat. B" → "A"), then the head of what remains, split on the credit
+     * separators (", ", " & ", " and ", …): "Old Sea Brigade, Amanda Bergman" →
+     * "Old Sea Brigade". Both sides of a comparison go through this, so an act
+     * whose name itself carries a separator ("Above & Beyond") still meets
+     * itself: both sides reduce to the same head.
+     */
+    internal fun primaryCredit(credit: String): String {
+        val noFeaturing = FEATURING_PLAIN.replace(FEATURING_BRACKETED.replace(credit, ""), "")
+        return noFeaturing.split(CREDIT_HEAD_SPLIT).firstOrNull()?.trim().orEmpty()
     }
 
     /**
      * The candidate of [candidates] that completes [song]: an ISRC-exact one first, then
-     * the strict-bar passer closest in duration (the given order breaks ties). Null when
-     * none passes — the song keeps its blanks.
+     * the strict-bar passer closest in duration (the given order breaks ties). When no
+     * candidate passes and the stored duration is the only bar in the way, the
+     * agreeing cluster (see [agreeingCluster]) may still complete the song — the
+     * cluster's candidate closest to the cluster's own middle is the pick, and
+     * [completion] replaces the outvoted duration with its length. Null when none
+     * passes either way — the song keeps its blanks.
      */
     fun pick(song: ImportedSong, candidates: List<Candidate>): Candidate? {
         val ok = candidates.filter { accepted(song, it) }
-        if (ok.isEmpty()) return null
-        val wanted = Match.isrc(song.isrc)
-        if (wanted != null) ok.firstOrNull { Match.isrc(it.isrc) == wanted }?.let { return it }
-        return ok.minByOrNull { c ->
-            if (song.durationMs > 0 && c.durationMs > 0) abs(c.durationMs - song.durationMs) else Long.MAX_VALUE
+        if (ok.isNotEmpty()) {
+            val wanted = Match.isrc(song.isrc)
+            if (wanted != null) ok.firstOrNull { Match.isrc(it.isrc) == wanted }?.let { return it }
+            return ok.minByOrNull { c ->
+                if (song.durationMs > 0 && c.durationMs > 0) abs(c.durationMs - song.durationMs) else Long.MAX_VALUE
+            }
         }
+        val cluster = agreeingCluster(song, candidates) ?: return null
+        val sorted = cluster.map { it.durationMs }.sorted()
+        val middle = sorted[sorted.size / 2]
+        return cluster.minByOrNull { abs(it.durationMs - middle) }
+    }
+
+    /**
+     * [song] completed from [candidates], or null when none may: [pick] applied,
+     * then [completed] — except on the agreeing-cluster path, where the stored
+     * duration the cluster outvoted counts as unfilled first, so the accepted
+     * hit's duration replaces it instead of standing against it.
+     */
+    fun completion(song: ImportedSong, candidates: List<Candidate>): ImportedSong? {
+        val picked = pick(song, candidates) ?: return null
+        val cluster = agreeingCluster(song, candidates)
+        val base = if (cluster != null && cluster.contains(picked)) song.copy(durationMs = 0) else song
+        return completed(base, picked)
     }
 
     /** [song] with its blank ISRC / cover / album filled from [c]; present fields stand.
@@ -155,7 +257,8 @@ object CatalogCompletion {
      * A song with no catalog key takes the candidate's: its playable identity. A song
      * with no duration takes the candidate's: the length the audio hooks gate on (a
      * stated duration stands — the acceptance bar already checked the candidate
-     * against it). */
+     * against it; the one path that replaces a stated duration runs through
+     * [completion], which blanks an outvoted one before it gets here). */
     fun completed(song: ImportedSong, c: Candidate): ImportedSong = song.copy(
         isrc = song.isrc.ifBlank { c.isrc },
         coverUrl = song.coverUrl.ifBlank { c.coverUrl },
@@ -180,7 +283,7 @@ object CatalogCompletion {
                 async {
                     gate.withPermit {
                         runCatching { gather.candidates(song) }.getOrDefault(emptyList())
-                            .let { pick(song, it) }?.let { completed(song, it) } ?: song
+                            .let { completion(song, it) } ?: song
                     }
                 }
             }
@@ -196,6 +299,12 @@ object CatalogCompletion {
      * an ISRC, plus the chain's merged track search under the song's artist and title (and
      * under the title without its bracketed credits, for services that search every word).
      * The same recording offered twice is kept once.
+     *
+     * The searches also run under the credit's PRIMARY artist (see [primaryCredit]):
+     * a raw guest credit ("The Kid LAROI [feat. Youngboy Never Broke Again]") is a
+     * query the services answer poorly or not at all — the brackets and the guest's
+     * name are noise to them — so a row whose matcher would now accept the head
+     * artist's hit must still be able to REACH that hit.
      */
     private suspend fun catalogCandidates(song: ImportedSong): List<Candidate> {
         val chain = CatalogRuntime.chain()
@@ -205,7 +314,13 @@ object CatalogCompletion {
             runCatching { chain.resolve(song.title, song.artist, song.durationMs, song.isrc) }
                 .getOrNull()?.let(::add)
         }
-        val queries = listOf("${song.artist} ${song.title}", "${song.artist} ${Match.stripped(song.title)}").distinct()
+        val primary = primaryCredit(song.artist)
+        val queries = listOf(
+            "${song.artist} ${song.title}",
+            "${song.artist} ${Match.stripped(song.title)}",
+            "$primary ${song.title}",
+            "$primary ${Match.stripped(song.title)}",
+        ).distinct()
         for (query in queries) {
             runCatching { chain.searchHits(query, 0, 20) }.getOrNull()?.items?.forEach(::add)
         }

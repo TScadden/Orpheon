@@ -397,6 +397,123 @@ class AmazonPlaylistReaderTest {
         assertEquals(null, AmazonDom.declaredTotalOrNull("<html><body>Nothing stated</body></html>"))
     }
 
+    @Test fun theSummaryKnowsWhetherItsTotalWasStated() {
+        assertTrue(ReadSummary.of(found = 10, declared = 84).totalKnown)
+        assertTrue(ReadSummary.of(found = 84, declared = 84).totalKnown)
+        // No total stated: unknown. The confirm step's licence to print "of M"
+        // is withheld however round the haul looks — "9 of 9 songs read" over a
+        // 9-song window of an 84-song list (v29) was a completeness the read
+        // never verified, printed because the haul had been defaulted into the
+        // total's place.
+        assertFalse(ReadSummary.of(found = 9, declared = null).totalKnown)
+        assertFalse(ReadSummary.of(found = 9, declared = 0).totalKnown)
+        // A page that states no total leaves its Page total unstated too.
+        assertEquals(null, AmazonDom.parse(fixture("playlist_rows.html")).declaredTotal)
+    }
+
+    @Test fun aScrollerThatNeverMovedCannotDeclareTheBottom() {
+        val judge = BottomJudge()
+        val decoy = ScrollStep(listOf(
+            ScrollerReport(ScrollerKind.LARGEST, "div.rail", 0, 0, 640, 640),
+        ))
+        // The decoy reads "at bottom" from the very first pass…
+        assertTrue(decoy.reports[0].atBottom)
+        // …and it still cannot declare the bottom: it never travelled anywhere.
+        assertFalse(judge.atBottom(decoy))
+        assertFalse(judge.atBottom(decoy))
+        // The document, once it has actually travelled, may judge its own bottom.
+        val travelling = ScrollStep(listOf(
+            ScrollerReport(ScrollerKind.DOCUMENT, "html", 0, 500, 5_000, 800),
+        ))
+        assertFalse(judge.atBottom(travelling))
+        val rested = ScrollStep(listOf(
+            ScrollerReport(ScrollerKind.DOCUMENT, "html", 4_200, 4_200, 5_000, 800),
+        ))
+        assertTrue(judge.atBottom(rested))
+        // No step at all: no verdict.
+        assertFalse(BottomJudge().atBottom(null))
+        // A still anchor yields rather than vetoes: the rows' container never
+        // moves (a wrapper that cannot actually scroll), but the document
+        // travels and comes to rest — the document's verdict concludes.
+        val yielding = BottomJudge()
+        fun wrapped(docBefore: Int, docAfter: Int) = ScrollStep(listOf(
+            ScrollerReport(ScrollerKind.ANCHOR, "div.wrap", 0, 0, 5_000, 800),
+            ScrollerReport(ScrollerKind.DOCUMENT, "html", docBefore, docAfter, 5_000, 800),
+        ))
+        assertFalse(yielding.atBottom(wrapped(0, 500)))
+        assertTrue(yielding.atBottom(wrapped(4_200, 4_200)))
+    }
+
+    @Test fun aDecoyScrollerCannotEndCollectionAtTheFirstWindow() {
+        // A modelled virtualized page of 84 rows, ~9 rendered per window, with
+        // the trap the real page sets: its LARGEST scrollable element is a decoy
+        // (a rail, already at its own bottom, never moving) and the document
+        // never moves either — only the rows' own container travels. A verdict
+        // taken from the largest element (the pre-v31 rule) concludes the read
+        // at the first window; judged by the rows' own scroller under
+        // BottomJudge, collection runs to the true bottom with all 84.
+        val total = 84
+        val window = 9
+        val maxStart = total - window
+        fun rows(from: Int): List<ImportedSong> =
+            (from until minOf(from + window, total)).map { i ->
+                row("B0TRK%05d".format(i), "Song $i", "Artist ${i % 7}")
+            }
+        val anchorClient = 560
+        val anchorHeight = total * 62
+        var clock = 0L
+        val collect = AmazonCollect()
+        val end = CollectEnd(now = { clock })
+        val judge = BottomJudge()
+        var anchorTop = 0
+        fun pass(added: Int): Boolean {
+            val before = anchorTop
+            anchorTop = minOf(anchorTop + anchorClient, anchorHeight - anchorClient)
+            val step = ScrollStep(listOf(
+                ScrollerReport(ScrollerKind.ANCHOR, "div.tracklist", before, anchorTop, anchorHeight, anchorClient),
+                ScrollerReport(ScrollerKind.DOCUMENT, "html", 0, 0, 812, 812),
+                ScrollerReport(ScrollerKind.LARGEST, "div.rail", 0, 0, 640, 640),
+            ))
+            // The decoy's own reading, every pass: bottom. It must never govern.
+            assertTrue(step.reports.first { it.kind == ScrollerKind.LARGEST }.atBottom)
+            return end.offer(added, judge.atBottom(step), total, collect.songs.size)
+        }
+        var start = 0
+        var done = end.offer(collect.add(rows(0)), atBottom = false, declaredTotal = total, collected = collect.songs.size)
+        assertFalse(done)
+        var guard = 0
+        while (!done && guard++ < 300) {
+            clock += 1_100
+            start = minOf(start + window, maxStart)
+            done = pass(collect.add(rows(start)))
+            assertFalse(
+                "collection concluded at ${collect.songs.size} of $total behind the decoy's verdict",
+                done && collect.songs.size < total,
+            )
+        }
+        assertTrue(done)
+        assertEquals(total, collect.songs.size)
+        assertEquals((0 until total).map { "Song $it" }, collect.songs.map { it.title })
+    }
+
+    @Test fun theJournalLineNamesTheScrollersAndTheVerdict() {
+        val pass = CollectPass(3, listOf(
+            ScrollerReport(ScrollerKind.ANCHOR, "div.tracklist", 0, 540, 5_210, 557),
+            ScrollerReport(ScrollerKind.LARGEST, "div.rail", 0, 0, 640, 640),
+        ), added = 9, held = 28, judgedBottom = false)
+        val line = pass.line()
+        assertTrue(line.contains("pass 3"))
+        assertTrue(line.contains("anchor div.tracklist top 0→540"))
+        assertTrue(line.contains("largest div.rail"))
+        assertTrue(line.contains("[at bottom]"))
+        assertTrue(line.contains("+9 songs, 28 held"))
+        assertTrue(line.contains("bottom judged: no"))
+        // And the readout carries the journal when the read kept one.
+        val text = readout().copy(journal = listOf(line)).text()
+        assertTrue(text.contains("collect journal:"))
+        assertTrue(text.contains("pass 3"))
+    }
+
     @Test fun catalogCompletionFillsAnAmazonRowWithoutASpotifyId() = runBlocking {
         // The import's completion, driven with a stand-in catalog: an Amazon row (no
         // Spotify id, no ISRC) is completed on the strict title + artist + duration

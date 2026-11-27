@@ -114,6 +114,14 @@ data class AmazonReadout(
     val lastPoll: String,
     /** The first poll met an empty shell and the page was reloaded once (see the session). */
     val reloaded: Boolean = false,
+    /**
+     * The scroll collection's journal, one line per pass ([CollectPass.line]):
+     * which scrollers were stepped, how each moved, and the bottom verdict it
+     * was given. Kept for completed reads as much as failed ones — the confirm
+     * step's Read details shows it — because a collection that stops early is
+     * diagnosed from exactly this.
+     */
+    val journal: List<String> = emptyList(),
 ) {
     fun text(): String = buildString {
         appendLine("AMAZON READ")
@@ -132,13 +140,24 @@ data class AmazonReadout(
         appendLine("load: $loadOutcome")
         appendLine("reloaded once: ${if (reloaded) "yes" else "no"}")
         appendLine("last poll: $lastPoll")
+        if (journal.isNotEmpty()) {
+            appendLine("collect journal:")
+            journal.forEach { appendLine("  $it") }
+        }
     }.trimEnd()
 }
 
 object AmazonDom {
 
-    /** One rendered playlist page, read: its name, how many songs it declares, its rows. */
-    data class Page(val name: String, val declaredTotal: Int, val rows: List<ImportedSong>)
+    /**
+     * One rendered playlist page, read: its name, its rows, and how many songs it
+     * declares — null when it states none. The total is never defaulted to the
+     * rows at hand: a virtualized list shows a window, and the window's size
+     * masquerading as the playlist's size is how a 9-song read of an 84-song
+     * list came to print "9 of 9 songs read" (v29) — a completeness the read
+     * never verified. Unknown stays unknown, and the summary says so.
+     */
+    data class Page(val name: String, val declaredTotal: Int?, val rows: List<ImportedSong>)
 
     private val TRACK_ASIN = Regex("""trackAsin=([A-Za-z0-9]{10})""")
     private val ANCHOR = Regex(
@@ -198,7 +217,7 @@ object AmazonDom {
             // imported as a junk first song titled "84 SONGS" on a phone, ahead
             // of the real first track, which lost its slot to it.
             .filterNot { sameName(it.title, it.artist) || isCountLine(it.title) }
-        return Page(name(html), declaredTotal(html, rows.size), rows)
+        return Page(name(html), declaredTotalOrNull(html), rows)
     }
 
     /** A title and an artist that say the same thing (case and spacing aside). */
@@ -396,9 +415,6 @@ object AmazonDom {
     /** The page is a bot check (or another wall) rather than a playlist. */
     fun looksBlocked(html: String): Boolean = wallOf(html) == AmazonWall.CAPTCHA
 
-    private fun declaredTotal(html: String, fallback: Int): Int =
-        declaredTotalOrNull(html) ?: fallback
-
     /** The first row link of the page: an address carrying a track ASIN. */
     private val TRACK_LINK = Regex("""href\s*=\s*"[^"]*trackAsin=""", RegexOption.IGNORE_CASE)
 
@@ -563,14 +579,19 @@ internal class CollectEnd(
 /**
  * How a finished read is stated, as a value of its own so the mapping is
  * testable without a phone: the songs the read holds, and how many the page
- * declared ([declared] null when it stated none — the count alone is the
- * whole story then). A read that ends short of its declared total says so
- * through [shortBy] instead of presenting a partial import as complete.
+ * declared ([declared] null when it stated none). [totalKnown] is the line
+ * between the two honest statements the confirm step may make: with a stated
+ * total it prints "N of M songs read" (and the shortfall, through [shortBy],
+ * when short); without one it must say the total is unknown and the haul may
+ * be only part of the list — never "N of N", which dresses a window up as a
+ * whole playlist (the v29 "9 of 9" over a 9-song window of an 84-song list).
  */
 internal data class ReadSummary(val found: Int, val declared: Int?) {
     /** Songs the page declared that the read never gathered; 0 when whole or undeclared. */
     val shortBy: Int get() = if (declared == null) 0 else (declared - found).coerceAtLeast(0)
     val isShort: Boolean get() = shortBy > 0
+    /** Whether the page stated its total at all: the confirm step's licence to print "of M". */
+    val totalKnown: Boolean get() = declared != null
 
     companion object {
         fun of(found: Int, declared: Int?): ReadSummary =
@@ -578,9 +599,99 @@ internal data class ReadSummary(val found: Int, val declared: Int?) {
     }
 }
 
-/** One stepped scroll of the page's list: where it now rests, and whether that is its bottom. */
-internal data class ScrollStep(val top: Int, val height: Int, val client: Int) {
-    val atBottom: Boolean get() = height <= client || top + client >= height - 4
+/** Which scroller of the page a [ScrollerReport] describes. */
+internal enum class ScrollerKind {
+    /** The scrollable ancestor holding the most row links: the list's own container. */
+    ANCHOR,
+    /** The page itself (document element / window). */
+    DOCUMENT,
+    /** The largest scrollable element of the page: a fallback, and a known decoy. */
+    LARGEST,
+}
+
+/**
+ * One scroller of the page across one stepped pass: where it rested before and
+ * after the step, and its size as last measured. [moved] is the proof the
+ * bottom verdict demands (see [BottomJudge]): a scroller whose top never
+ * changed cannot be at a bottom it never travelled to.
+ */
+internal data class ScrollerReport(
+    val kind: ScrollerKind,
+    /** A short identity for the journal: the element's tag with its id or first class. */
+    val who: String,
+    val topBefore: Int,
+    val topAfter: Int,
+    val height: Int,
+    val client: Int,
+) {
+    val moved: Boolean get() = topAfter > topBefore
+    val atBottom: Boolean get() = height <= client || topAfter + client >= height - 4
+
+    /** This scroller's line of a pass journal. */
+    fun journalText(): String =
+        "${kind.name.lowercase()} $who top $topBefore→$topAfter (height $height, client $client)" +
+            (if (atBottom) " [at bottom]" else "")
+}
+
+/** One stepped scroll of the page: every scroller the step measured, the rows' own first. */
+internal data class ScrollStep(val reports: List<ScrollerReport>) {
+    val anchor: ScrollerReport? get() = reports.firstOrNull { it.kind == ScrollerKind.ANCHOR }
+}
+
+/**
+ * Whether a stepped pass rested at the list's TRUE bottom, judged from the
+ * pass's [ScrollStep] — a decision of its own so it is testable without a
+ * phone. Two rules, learned from three reads that each ended at the first
+ * window:
+ *
+ *  - The verdict comes from the scroller that contains the rows (the anchor's
+ *    own scrollable ancestor), never from the page's largest scrollable
+ *    element: the largest is as often a rail or a chrome panel, which can read
+ *    "at bottom" from the first pass while the list's container never moves.
+ *  - A scroller whose scrollTop never changed across the whole read cannot
+ *    declare the bottom. The step script steps the document and the row
+ *    container alike, so a container that cannot actually scroll (a wrapper
+ *    whose overflow is visible, a decoy) is found out by its own stillness:
+ *    the highest-priority scroller that HAS proven it can move gives the
+ *    verdict, so a never-moved anchor yields to a travelled document rather
+ *    than vetoing the read into its caps.
+ */
+internal class BottomJudge {
+    private val provenMovers = mutableSetOf<ScrollerKind>()
+
+    /** The credible bottom verdict for one stepped pass; false when the step is unknown. */
+    fun atBottom(step: ScrollStep?): Boolean {
+        if (step == null || step.reports.isEmpty()) return false
+        step.reports.forEach { if (it.moved || it.topAfter > 0) provenMovers += it.kind }
+        val judge = listOf(ScrollerKind.ANCHOR, ScrollerKind.DOCUMENT, ScrollerKind.LARGEST)
+            .firstNotNullOfOrNull { kind ->
+                step.reports.firstOrNull { it.kind == kind && kind in provenMovers }
+            }
+            ?: return false
+        return judge.atBottom
+    }
+}
+
+/**
+ * One pass of a scroll collection, journaled: which scrollers were stepped and
+ * how each answered, what the pass added, what the read then held, and the
+ * bottom verdict it was given. The journal rides the read's readout (see
+ * [AmazonReadout]) onto the confirm step's Read details, so a read that still
+ * stops early on a real page carries its own diagnosis with it.
+ */
+internal data class CollectPass(
+    val pass: Int,
+    val reports: List<ScrollerReport>,
+    val added: Int,
+    val held: Int,
+    val judgedBottom: Boolean,
+) {
+    fun line(): String = buildString {
+        append("pass $pass: ")
+        if (reports.isEmpty()) append("no scroller answered")
+        else append(reports.joinToString(" · ") { it.journalText() })
+        append(" · +$added songs, $held held · bottom judged: ${if (judgedBottom) "yes" else "no"}")
+    }
 }
 
 /**
@@ -632,6 +743,8 @@ class AmazonReadSession(context: Context, val url: String) {
     private var lastDeclaredTotal: Int? = null
     /** The empty-shell reload: attempted at most once per read, and the readout says so. */
     private var reloaded = false
+    /** Every collect pass, journaled as it happens: the read's own evidence (see [CollectPass]). */
+    private val collectJournal = mutableListOf<CollectPass>()
 
     val webView: WebView = WebView(context).apply {
         settings.javaScriptEnabled = true
@@ -772,6 +885,7 @@ class AmazonReadSession(context: Context, val url: String) {
         declaredTotal = declared ?: 0
         stage = amazonPollStage(foundCount, declared ?: Int.MAX_VALUE)
         val end = CollectEnd()
+        val judge = BottomJudge()
         var passes = 0
         val deadline = System.currentTimeMillis() + COLLECT_CAP_MS
         var done = end.offer(first.rows.size, atBottom = false, declared, collect.songs.size)
@@ -786,38 +900,54 @@ class AmazonReadSession(context: Context, val url: String) {
             foundCount = collect.songs.size
             declaredTotal = declared ?: 0
             stage = amazonPollStage(foundCount, declared ?: Int.MAX_VALUE)
+            // The bottom verdict is the judge's, not any single scroller's: the
+            // rows' own container decides, and only once it has proven it moves
+            // (see BottomJudge). Every pass is journaled either way.
+            val judgedBottom = judge.atBottom(step)
+            collectJournal += CollectPass(passes + 1, step?.reports.orEmpty(), added, collect.songs.size, judgedBottom)
             lastPoll = "collect pass ${passes + 1}: +$added songs, ${collect.songs.size} held"
             passes++
-            done = end.offer(added, step?.atBottom ?: false, declared, collect.songs.size)
+            done = end.offer(added, judgedBottom, declared, collect.songs.size)
         }
-        // The read's own statement of itself: whole, or short by a number the
-        // confirm step shows plainly (the Imported total carries the declared
-        // count, so "10 of 84 songs read" — and the shortfall line — say what
-        // a partial read is instead of dressing it as complete).
+        // The read's own statement of itself: whole against a stated total, short
+        // by a number the confirm step shows plainly — or, when the page never
+        // stated a total, honestly unstated: the Imported carries the declared
+        // count only when one was actually found (see ReadSummary.totalKnown),
+        // so the confirm step can never print the haul as the whole list on a
+        // total nobody verified.
         val summary = ReadSummary.of(collect.songs.size, declared)
         if (summary.isShort) {
             lastPoll = "collect ended short: ${summary.found} of ${summary.declared} songs read"
+        } else if (!summary.totalKnown) {
+            lastPoll = "collect ended: ${summary.found} songs read; the page stated no total"
         }
         imported = PlaylistImport.Imported(
             first.name, collect.songs, maxOf(summary.declared ?: 0, summary.found),
+            declaredTotal = summary.declared,
+            totalStated = true,
+            readDetails = readout(collect.songs.size).text(),
         )
         stage = AmazonStage.DONE
         phase = Phase.DONE
     }
 
+    /** The read's facts as a readout, for a failure's screen or a success's Read details. */
+    private fun readout(rowsFound: Int): AmazonReadout = AmazonReadout(
+        url = url,
+        pageTitle = pageTitle.ifBlank { runCatching { webView.title }.getOrNull().orEmpty() },
+        pageUrl = lastPageUrl.ifBlank { runCatching { webView.url }.getOrNull().orEmpty() },
+        htmlBytes = lastHtmlBytes,
+        rowsFound = rowsFound,
+        wall = lastWall,
+        loadOutcome = loadOutcome,
+        lastPoll = lastPoll,
+        reloaded = reloaded,
+        journal = collectJournal.map { it.line() },
+    )
+
     /** Lands the read on failure, with the readout of what the page actually was. */
     private fun fail() {
-        failureReadout = AmazonReadout(
-            url = url,
-            pageTitle = pageTitle.ifBlank { runCatching { webView.title }.getOrNull().orEmpty() },
-            pageUrl = lastPageUrl.ifBlank { runCatching { webView.url }.getOrNull().orEmpty() },
-            htmlBytes = lastHtmlBytes,
-            rowsFound = foundCount,
-            wall = lastWall,
-            loadOutcome = loadOutcome,
-            lastPoll = lastPoll,
-            reloaded = reloaded,
-        )
+        failureReadout = readout(foundCount)
         stage = AmazonStage.FAILED
         phase = Phase.FAILED
     }
@@ -870,12 +1000,23 @@ class AmazonReadSession(context: Context, val url: String) {
         return null
     }
 
-    /** Advances the page's list by one screen and reports where it came to rest. */
+    /** Advances the page's list by one screen and reports how every scroller answered. */
     private suspend fun scrollStep(): ScrollStep? {
         val raw = runJs(js, STEP_JS, EVAL_TIMEOUT_MS) ?: return null
         return runCatching {
-            val o = org.json.JSONObject(raw)
-            ScrollStep(o.getInt("top"), o.getInt("height"), o.getInt("client"))
+            val arr = org.json.JSONObject(raw).getJSONArray("reports")
+            val reports = (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                ScrollerReport(
+                    kind = ScrollerKind.valueOf(o.getString("kind").uppercase()),
+                    who = o.getString("who"),
+                    topBefore = o.getInt("before"),
+                    topAfter = o.getInt("after"),
+                    height = o.getInt("height"),
+                    client = o.getInt("client"),
+                )
+            }
+            ScrollStep(reports)
         }.getOrNull()
     }
 
@@ -939,18 +1080,24 @@ class AmazonReadSession(context: Context, val url: String) {
         /**
          * Steps the page's list down by one screen — never a jump to the bottom:
          * a virtualized list renders only what it rests on, so a jump renders
-         * the end and skips the middle — and reports where it came to rest as
-         * JSON: {"top":…,"height":…,"client":…} of the scroller that moved.
+         * the end and skips the middle — and reports EVERY scroller it measured
+         * as JSON: {"reports":[{"kind":…,"who":…,"before":…,"after":…,
+         * "height":…,"client":…}, …]} (see [ScrollerReport]).
          *
-         * The scroller stepped is the one that actually holds the rows: the
-         * walk starts from a row's own track link and climbs to its nearest
-         * scrollable ancestor, crossing shadow boundaries through their hosts
-         * — the player renders its list inside shadow roots (the serializer
-         * inlines them for reading), and a stepper that only queries the light
-         * DOM never sees that container at all: it stepped the document, the
-         * rows never moved, every pass read as the bottom, and collection
-         * ended with the first window. Fallbacks, in order: the largest
-         * scrollable element of the deep walk, then the page itself.
+         * Which scroller holds the rows is decided by the rows themselves:
+         * every track link's nearest scrollable ancestor (climbing through
+         * shadow hosts — the player renders its list inside shadow roots, and a
+         * stepper that only queries the light DOM never sees that container at
+         * all) is tallied, and the ancestor holding the most links is the list's
+         * container: the "anchor" scroller. It and the document are stepped
+         * each pass, and each reports its top before and after — the movement
+         * is the evidence [BottomJudge] judges by, because a bottom verdict
+         * taken from the page's largest scrollable element ended real reads at
+         * the first window: the largest is as often a rail or a chrome panel
+         * that sits at its own bottom from the start. The largest is still
+         * measured every pass (the journal shows it for what it is) and is
+         * stepped only in its fallback role, when no row link has a scrollable
+         * ancestor at all.
          */
         const val STEP_JS = """
             (function(){
@@ -975,29 +1122,50 @@ class AmazonReadSession(context: Context, val url: String) {
                 return null;
               }
               var doc = document.documentElement;
+              function describe(e){
+                var s = e.tagName ? e.tagName.toLowerCase() : '?';
+                if (e.id) s += '#' + e.id;
+                else if (typeof e.className === 'string' && e.className.trim()) s += '.' + e.className.trim().split(/\s+/)[0];
+                return s;
+              }
+              function measure(e){
+                var top = e === doc ? (window.scrollY || doc.scrollTop || 0) : (e.scrollTop || 0);
+                return { top: Math.round(top), height: Math.round(e.scrollHeight || 0), client: Math.round(e.clientHeight || window.innerHeight || 0) };
+              }
+              function stepEl(e){
+                var view = e.clientHeight || window.innerHeight || 600;
+                var step = Math.max(200, Math.floor(view * 0.9));
+                e.scrollTop = Math.min((e.scrollTop || 0) + step, e.scrollHeight || 0);
+                if (e === doc) window.scrollTo(0, Math.min((window.scrollY || 0) + step, doc.scrollHeight || 0));
+              }
               var all = deepAll(document, []);
-              var anchor = null;
+              var tally = new Map();
               for (var i = 0; i < all.length; i++) {
                 var h = all[i].getAttribute ? all[i].getAttribute('href') : null;
-                if (h && h.indexOf('trackAsin=') >= 0) { anchor = all[i]; break; }
-              }
-              var target = anchor ? nearestScroller(anchor) : null;
-              if (!target) {
-                var bestH = 0;
-                for (var j = 0; j < all.length; j++) {
-                  var e2 = all[j];
-                  if (scrollable(e2) && e2.scrollHeight > bestH) { bestH = e2.scrollHeight; target = e2; }
+                if (h && h.indexOf('trackAsin=') >= 0) {
+                  var sc = nearestScroller(all[i]);
+                  if (sc) tally.set(sc, (tally.get(sc) || 0) + 1);
                 }
               }
-              if (!target) target = doc;
-              var view = target.clientHeight || window.innerHeight || 600;
-              var step = Math.max(200, Math.floor(view * 0.9));
-              target.scrollTop = Math.min((target.scrollTop || 0) + step, target.scrollHeight || 0);
-              if (target === doc) window.scrollTo(0, Math.min((window.scrollY || 0) + step, doc.scrollHeight || 0));
-              var top = target === doc ? (window.scrollY || doc.scrollTop || 0) : (target.scrollTop || 0);
-              var height = target.scrollHeight || 0;
-              var client = target.clientHeight || window.innerHeight || 0;
-              return JSON.stringify({top: Math.round(top), height: Math.round(height), client: Math.round(client)});
+              var anchorScroller = null, bestCount = 0;
+              tally.forEach(function(n, sc){ if (n > bestCount) { bestCount = n; anchorScroller = sc; } });
+              var largest = null, bestH = 0;
+              for (var j = 0; j < all.length; j++) {
+                var e2 = all[j];
+                if (scrollable(e2) && e2.scrollHeight > bestH) { bestH = e2.scrollHeight; largest = e2; }
+              }
+              var reports = [];
+              function report(kind, e, doStep){
+                if (!e) return;
+                var before = measure(e);
+                if (doStep) stepEl(e);
+                var after = measure(e);
+                reports.push({kind: kind, who: describe(e), before: before.top, after: after.top, height: after.height, client: after.client});
+              }
+              report('anchor', anchorScroller, true);
+              if (doc !== anchorScroller) report('document', doc, true);
+              if (largest && largest !== anchorScroller && largest !== doc) report('largest', largest, !anchorScroller);
+              return JSON.stringify({reports: reports});
             })()
         """
     }

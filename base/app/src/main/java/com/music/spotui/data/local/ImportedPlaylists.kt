@@ -291,8 +291,12 @@ object ImportedPlaylists {
      * [completedByKey] (row key → the pass's row of it): the ISRC, the cover, the
      * album name, the duration, the explicitness and the catalog key are filled
      * wherever the stored song lacks them — a field the stored song already
-     * carries is never overwritten, a song the pass does not know is left as it
-     * is, and the list itself never changes. [repair]'s sibling for the playlists
+     * carries is never overwritten, with the duration's one exception: a duration
+     * the pass itself corrected under its agreeing-cluster rule (see
+     * CatalogCompletion) replaces the stored one, since the stored value was the
+     * thing standing between the row and every source. A song the pass does not
+     * know is left as it is, and the list itself never changes. [repair]'s sibling
+     * for the playlists
      * that repair cannot reach: a Spotify repair re-reads by Spotify track id,
      * but an Amazon or file import's rows have none — they are completed from
      * the catalog instead, matched by their own row keys, and the catalog key
@@ -312,7 +316,13 @@ object ImportedPlaylists {
                     val isrc = if (s.isrc.isBlank()) fresh.isrc else s.isrc
                     val cover = if (s.coverUrl.isBlank()) fresh.coverUrl else s.coverUrl
                     val album = if (s.album.isBlank()) fresh.album else s.album
-                    val duration = if (s.durationMs > 0) s.durationMs else fresh.durationMs
+                    // The pass's duration wins whenever it states one: a blank takes
+                    // the fill, and a stated one the pass changed is its agreeing-
+                    // cluster correction (CatalogCompletion.completion blanks an
+                    // outvoted duration before filling) — the only path on which a
+                    // completed row's duration differs from the stored one. A pass
+                    // that states none leaves the stored value exactly as it was.
+                    val duration = if (fresh.durationMs > 0) fresh.durationMs else s.durationMs
                     val explicit = if (s.explicit == app.myspoti.api.Explicitness.UNKNOWN) fresh.explicit else s.explicit
                     val catalogKey = if (s.catalogKey.isBlank()) fresh.catalogKey else s.catalogKey
                     if (isrc == s.isrc && cover == s.coverUrl && album == s.album &&
