@@ -29,6 +29,19 @@ import org.junit.Test
  * by: a Spotify id, or a catalog key. These tests build that request from an
  * Amazon-shaped row and a Spotify-shaped row, side by side, through the same
  * production gates (AudioRoute.asks, AudioRoute.songsFor, CatalogRuntime).
+ *
+ * v29 adds the second half of the contract, the half v28's tests could not
+ * see because every fixture row carried durationMs 0: being ASKED is not
+ * being ANSWERED. The extensions resolve by the ask's metadata — Melzo's
+ * resolver (its own main.js) refuses a track whose durationMs is not
+ * positive before it searches, and scores candidates against that duration —
+ * and an Amazon row whose page stated no duration kept 0 through every pass,
+ * because the completion never filled durations and never counted a missing
+ * one as thin. The hook side of that refusal is pinned against the real
+ * runtime in the extensions module (AudioHookContractTest); the tests below
+ * pin the app side: the completion fills the duration under its strict bar,
+ * counts a duration-less row as thin however complete its other fields read,
+ * and the write-back persists the filled duration.
  */
 class ImportedPlayabilityTest {
 
@@ -109,6 +122,62 @@ class ImportedPlayabilityTest {
         assertEquals("deezer.3135556", again.items.single().catalogKey)
         assertEquals("deezer.3135556", again.items.single().playId)
         assertTrue(AudioRoute.asks(again.items.single().playId, hasAudioSource = true))
+    }
+
+    @Test fun aDurationlessRowIsThinHoweverCompleteItsOtherFieldsRead() {
+        // Tyson's v28 rows exactly: identity, ISRC, cover and album all attached
+        // by the earlier pass — and no duration, because the page stated none.
+        val row = amazonRow().copy(
+            isrc = "USRC12345678", catalogKey = "deezer.3135556",
+            coverUrl = "https://img/bleed", album = "THE FIRST TIME",
+            explicit = app.myspoti.api.Explicitness.CLEAN,
+        )
+        assertEquals(0L, row.durationMs)
+        assertTrue(CatalogCompletion.thin(row))
+        assertFalse(CatalogCompletion.thin(row.copy(durationMs = 207_000L)))
+    }
+
+    @Test fun theCompletionFillsAMissingDurationAndTheWriteBackPersistsIt() = runBlocking {
+        val stored = amazonRow().copy(
+            isrc = "USRC12345678", catalogKey = "deezer.3135556",
+            coverUrl = "https://img/bleed", album = "THE FIRST TIME",
+        )
+        val p = ImportedPlaylists.create(
+            "Hype", "https://music.amazon.com/user-playlists/B0PLAAAA1111", listOf(stored), origin = "amazon",
+        )
+        // The catalog's answer for the row, carrying the recording's own length.
+        val pass = CatalogCompletion.complete(
+            ImportedPlaylists.get(p.id)!!.items,
+            CatalogCompletion.Gatherer { listOf(bleedHit.copy(durationMs = 207_000L)) },
+        )
+        assertEquals(207_000L, pass.single().durationMs)
+
+        ImportedPlaylists.complete(p.id, pass.associateBy { it.key })
+        val after = ImportedPlaylists.get(p.id)!!.items.single()
+        assertEquals(207_000L, after.durationMs)
+        // The model the tap builds from the healed row (Api.importedSongOf's own
+        // fields) now carries the duration the hook gates on.
+        val model = SongsModel(
+            id = 1, title = after.title, album = after.album, singer = after.artist,
+            coverUri = after.coverUrl, url = "", spotifyTrackId = after.playId,
+            durationMs = after.durationMs.toInt(), isrc = after.isrc,
+        )
+        assertTrue(model.durationMs > 0)
+        // And it survives a restart: the store's own round trip.
+        val text = ImportedPlaylists.write()
+        ImportedPlaylists.playlists.clear()
+        ImportedPlaylists.read(text)
+        assertEquals(207_000L, ImportedPlaylists.get(p.id)!!.items.single().durationMs)
+    }
+
+    @Test fun aStatedDurationIsNeverOverwrittenByACompletion() = runBlocking {
+        // Blanks only: a row whose source stated a duration keeps it, even when
+        // the accepted hit (inside the length window) states a different one.
+        val row = amazonRow().copy(durationMs = 205_000L)
+        val done = CatalogCompletion.complete(
+            listOf(row), CatalogCompletion.Gatherer { listOf(bleedHit.copy(durationMs = 207_000L)) },
+        ).single()
+        assertEquals(205_000L, done.durationMs)
     }
 
     @Test fun theCompletionWriteBackFillsAStoredPlaylistsIdentityBlanksOnly() = runBlocking {

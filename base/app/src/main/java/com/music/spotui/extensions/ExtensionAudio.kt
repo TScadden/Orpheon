@@ -201,6 +201,32 @@ object ExtensionAudio {
     /** The extension that gave the audio of the song with Spotify id [trackId] last, or null. */
     fun providerOf(trackId: String): String? = known[trackId]?.stream?.providerId
 
+    /**
+     * One tap's ask of the extensions, journaled per song id for the Play debug sheet
+     * (ui/PlayDebug.kt): the exact [TrackInfo] the tap built and how the ask ended.
+     * In memory only — the last ask per song, read right after the tap it belongs to.
+     * The per-extension answers of that same ask live in [Extensions.attempts], which
+     * [Extensions.audio] itself records; this journal adds what the attempts do not
+     * hold: the TrackInfo as built, and the route the tap finally took.
+     */
+    data class AskRecord(
+        val at: Long,
+        val info: TrackInfo,
+        /** How the tap ended, in words the Play debug sheet shows as-is. */
+        val route: String,
+        /** The answering extension's id, when one answered. */
+        val providerId: String? = null,
+    )
+
+    private val asks = ConcurrentHashMap<String, AskRecord>()
+
+    /** The last tap's ask for the song [trackId], or null (not tapped this run). */
+    fun lastAsk(trackId: String): AskRecord? = asks[trackId]
+
+    private fun journal(trackId: String, info: TrackInfo, route: String, providerId: String? = null) {
+        if (trackId.isNotBlank()) asks[trackId] = AskRecord(System.currentTimeMillis(), info, route, providerId)
+    }
+
     /** The answer kept for the song [trackId] (what the extension announced about its audio), or null. */
     fun streamOf(trackId: String): AudioStream? = known[trackId]?.stream
 
@@ -261,9 +287,23 @@ object ExtensionAudio {
         songs: List<SongsModel>, picked: SongsModel, context: String, shuffle: Boolean, contextUri: String = "",
         isLatest: () -> Boolean = { true }, startMs: Long = 0L,
     ): Boolean {
-        if (picked.spotifyTrackId.isBlank() || !Extensions.hasAudioSource()) return false
+        if (picked.spotifyTrackId.isBlank() || !Extensions.hasAudioSource()) {
+            if (picked.spotifyTrackId.isNotBlank()) journal(
+                picked.spotifyTrackId,
+                Extensions.trackInfo(picked.spotifyTrackId, picked.title, picked.singer, picked.album, picked.durationMs.toLong(), picked.coverUri, picked.isrc),
+                "not asked: no audio-source extension is on",
+            )
+            return false
+        }
         // Another Spotify Connect device plays: the song goes there, played by Spotify.
-        if (com.music.spotui.di.SongPlayer.activeDevice.value != null) return false
+        if (com.music.spotui.di.SongPlayer.activeDevice.value != null) {
+            journal(
+                picked.spotifyTrackId,
+                Extensions.trackInfo(picked.spotifyTrackId, picked.title, picked.singer, picked.album, picked.durationMs.toLong(), picked.coverUri, picked.isrc),
+                "not asked: another device is playing",
+            )
+            return false
+        }
         // A song asked ahead (the next one of the queue) is not asked again: the extension would
         // take a second ask for a refused address and resolve it anew.
         // A downloaded song plays from its file whatever the extensions have: asked first, a miss (after
@@ -290,16 +330,32 @@ object ExtensionAudio {
             } finally { picking.decrementAndGet() } ?: run {
                 if (ask != null && !ask.isCompleted) {
                     app.myspoti.host.android.Logbook.log("audio: no extension audio for ${picked.title} within ${(Extensions.PICK_AUDIO_MS + 1_000) / 1000} s: Spotify plays it, the extension's answer is still awaited")
+                    journal(picked.spotifyTrackId, info, "no answer within the tap's wait — the ask went on in the background; Spotify was offered the song")
                     awaited.add(picked.spotifyTrackId)
                     late.launch {
-                        val s = try { runCatching { ask.await() }.getOrNull() } finally { awaited.remove(picked.spotifyTrackId) } ?: return@launch
+                        val s = try { runCatching { ask.await() }.getOrNull() } finally { awaited.remove(picked.spotifyTrackId) }
+                        if (s == null) {
+                            journal(picked.spotifyTrackId, info, "the background ask ended: no extension had it")
+                            return@launch
+                        }
+                        journal(picked.spotifyTrackId, info, "answered after the tap's wait", s.providerId)
                         keep(picked.spotifyTrackId, s)
                         withContext(Dispatchers.Main) { com.music.spotui.di.SongPlayer.extensionAnsweredLate(picked.spotifyTrackId) }
                     }
-                } else app.myspoti.host.android.Logbook.log("audio: no extension had ${picked.title}: Spotify plays it")
+                } else {
+                    app.myspoti.host.android.Logbook.log("audio: no extension had ${picked.title}: Spotify plays it")
+                    journal(picked.spotifyTrackId, info, "no extension had it — Spotify was offered the song")
+                }
                 return false
             }
             keep(picked.spotifyTrackId, first)
+            journal(picked.spotifyTrackId, info, if (cached != null) "answered from the answer kept earlier" else "answered", first.providerId)
+        } else {
+            journal(
+                picked.spotifyTrackId,
+                Extensions.trackInfo(picked.spotifyTrackId, picked.title, picked.singer, picked.album, picked.durationMs.toLong(), picked.coverUri, picked.isrc),
+                "played from its download — the extensions were not asked",
+            )
         }
         // A newer tap answered meanwhile: nothing to build. The queue of a list of thousands (Liked
         // Songs) is built off the main thread: built on it, it held the screen until an ANR (#.money0).

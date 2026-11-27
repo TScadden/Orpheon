@@ -38,12 +38,19 @@ import kotlin.math.abs
  * the list itself never changes: same songs, same order. A song the catalog cannot answer
  * for (or a lookup that fails) is left exactly as it was.
  *
- * The pass also attaches the one field that makes an id-less row playable at all: the
- * hit's catalog key ([Candidate.catalogKey]). The extensions are only ever asked for a
- * song by an id — a Spotify id, or a catalog key — so an Amazon row the completion
- * filled with an ISRC and a cover but no identity still could not play (seen on a
- * phone: clean titles, covers, "No source plays" on every tap). The key is attached
- * under the same strict bar as every other field, never looser.
+ * The pass also attaches the two fields that decide whether a row can play at all. The
+ * first is the hit's catalog key ([Candidate.catalogKey]): the app refuses to ask the
+ * extensions about a song with no id at all (ExtensionAudio.playList), so an Amazon row
+ * with no Spotify id plays under the key its completion attached. The second is the
+ * hit's duration. The audio-source extensions resolve a song by the metadata they are
+ * handed — title, artist, duration — and the resolver of the source this phone uses
+ * (Melzo's, read in its own code) refuses a track whose duration is not positive before
+ * it searches at all, and scores every candidate against that duration. An Amazon row
+ * whose page stated no duration (the phone's rendering of the page shows none) was
+ * therefore unanswerable forever: v28 attached its identity and its ISRC, and every
+ * tap still ended "No source plays", because no pass anywhere filled the one field
+ * the hook gates on. A duration the row lacks is filled from the accepted hit, under
+ * the same strict bar as every other field, never looser.
  */
 object CatalogCompletion {
 
@@ -77,10 +84,16 @@ object CatalogCompletion {
      * Spotify id is also thin while it carries no catalog key, however full its
      * other fields read: the key is its playable identity, and a row the page
      * itself furnished with a cover and an album (an Amazon row) is exactly the
-     * one that would otherwise never be gathered for and never play.
+     * one that would otherwise never be gathered for and never play. A row with
+     * no duration is thin for the same reason: the audio hooks resolve by title,
+     * artist and duration, and refuse a duration-less track outright (see the
+     * class doc), so a row whose source stated no duration must be gathered for
+     * until a completion fills it — v28 left such rows "complete" with an
+     * identity and an ISRC and they still could not play.
      */
     fun thin(song: ImportedSong): Boolean =
         song.isrc.isBlank() || song.coverUrl.isBlank() || song.album.isBlank() ||
+            song.durationMs <= 0 ||
             song.explicit == app.myspoti.api.Explicitness.UNKNOWN ||
             (song.spotifyTrackId.isBlank() && song.catalogKey.isBlank())
 
@@ -139,11 +152,15 @@ object CatalogCompletion {
 
     /** [song] with its blank ISRC / cover / album filled from [c]; present fields stand.
      * An unjudged song also takes the candidate's stated explicitness; a stated one stands.
-     * A song with no catalog key takes the candidate's: its playable identity. */
+     * A song with no catalog key takes the candidate's: its playable identity. A song
+     * with no duration takes the candidate's: the length the audio hooks gate on (a
+     * stated duration stands — the acceptance bar already checked the candidate
+     * against it). */
     fun completed(song: ImportedSong, c: Candidate): ImportedSong = song.copy(
         isrc = song.isrc.ifBlank { c.isrc },
         coverUrl = song.coverUrl.ifBlank { c.coverUrl },
         album = song.album.ifBlank { c.album },
+        durationMs = if (song.durationMs > 0) song.durationMs else c.durationMs,
         explicit = if (song.explicit == app.myspoti.api.Explicitness.UNKNOWN) c.explicit else song.explicit,
         catalogKey = song.catalogKey.ifBlank { c.catalogKey },
     )
