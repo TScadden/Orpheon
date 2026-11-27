@@ -96,6 +96,7 @@ import com.music.spotui.data.entity.ContextPageModel
 import com.music.spotui.data.entity.SongsModel
 import com.music.spotui.di.CurrentSongState
 import com.music.spotui.di.Graph
+import com.music.spotui.di.likedRowShown
 import com.music.spotui.di.Palette
 import com.music.spotui.di.SongPlayer
 import com.music.spotui.ui.components.Loader
@@ -800,7 +801,7 @@ private fun ContextContent(navController: NavController, vm: ContextViewModel, p
     val findable = p.type == "liked" || p.type == "playlist" || p.type == "imported"
     val all by remember(p) {
         derivedStateOf {
-            if (p.type == "liked" || p.type == "liked-artist") p.tracks.filter { SongPlayer.library["spotify:track:${it.spotifyTrackId}"] != false } else p.tracks
+            if (p.type == "liked" || p.type == "liked-artist") p.tracks.filter { likedRowShown(it) } else p.tracks
         }
     }
     // An own playlist in its own order: its songs can be moved by hand, a handle on each while

@@ -172,6 +172,77 @@ class AmazonPlaylistReaderTest {
         assertEquals(4, collect.songs.size)
     }
 
+    @Test fun anArtistCreditInTheTitleSlotIsReDerivedOrSkipped() {
+        // The shape of Tyson's v26 import: the text-bearing track link carries the
+        // artist credit and the title is a plain line of the row. The real title
+        // must win; the row with no title line anywhere must not import at all.
+        val page = AmazonDom.parse(fixture("playlist_garbled.html"))
+        assertEquals("Hype Playlist", page.name)
+        assertEquals(2, page.declaredTotal)
+        assertEquals(1, page.rows.size)
+
+        val row = page.rows.single()
+        assertEquals("Too Much", row.title)
+        assertEquals("The Kid LAROI, Jung Kook & Central Cee", row.artist)
+        assertEquals("The First Time", row.album)
+        assertEquals(227_000L, row.durationMs)
+        assertEquals("B0TRACK101", row.asin)
+        assertEquals("https://m.media-amazon.com/images/I/51too.jpg", row.coverUrl)
+        assertFalse(page.rows.any { AmazonDom.sameName(it.title, it.artist) })
+    }
+
+    @Test fun aCorrectlyReadRowOfTheGarbledPageCompletesIntoAPlayableIdentity() = runBlocking {
+        // Playability follows from the clean read: the row parsed off the garbled
+        // page completes on the strict bar and comes out carrying its ISRC — the
+        // identity playback matches sources by (with the clean title + artist as
+        // the play query), exactly like a Spotify import's row.
+        val row = AmazonDom.parse(fixture("playlist_garbled.html")).rows.single()
+        val gather = CatalogCompletion.Gatherer { song ->
+            listOf(CatalogCompletion.Candidate(
+                title = song.title, artists = listOf(song.artist),
+                album = "The First Time", coverUrl = "https://img/too-much",
+                durationMs = 227_000L, isrc = "USRC12345678",
+            ))
+        }
+        val done = CatalogCompletion.complete(listOf(row), gather).single()
+        assertEquals("Too Much", done.title)
+        assertEquals("USRC12345678", done.isrc)
+        assertEquals("https://img/too-much", done.coverUrl)
+    }
+
+    @Test fun collectionEndsAtTheDeclaredTotalOrTheTrueBottomNeverTheWindow() {
+        // The declared total reached: over, however the passes looked.
+        assertTrue(CollectEnd().offer(added = 3, atBottom = false, declaredTotal = 10, collected = 10))
+        // New rows at the bottom: not over.
+        assertFalse(CollectEnd().offer(added = 2, atBottom = true, declaredTotal = null, collected = 5))
+        // No new rows away from the bottom: not over, however often it repeats.
+        val mid = CollectEnd()
+        repeat(5) { assertFalse(mid.offer(added = 0, atBottom = false, declaredTotal = null, collected = 5)) }
+        // The true bottom repeating empty ends it — on the third empty rest, not before.
+        val end = CollectEnd()
+        assertFalse(end.offer(added = 0, atBottom = true, declaredTotal = null, collected = 5))
+        assertFalse(end.offer(added = 0, atBottom = true, declaredTotal = null, collected = 5))
+        assertTrue(end.offer(added = 0, atBottom = true, declaredTotal = null, collected = 5))
+        // A fresh row at the bottom resets the run of empty rests.
+        val reset = CollectEnd()
+        assertFalse(reset.offer(added = 0, atBottom = true, declaredTotal = null, collected = 5))
+        assertFalse(reset.offer(added = 1, atBottom = true, declaredTotal = null, collected = 6))
+        assertFalse(reset.offer(added = 0, atBottom = true, declaredTotal = null, collected = 6))
+        assertFalse(reset.offer(added = 0, atBottom = true, declaredTotal = null, collected = 6))
+        assertTrue(reset.offer(added = 0, atBottom = true, declaredTotal = null, collected = 6))
+        // No declared total: the count alone never ends it — the window's size is
+        // not a total, and ending there capped a long playlist at its first screen.
+        val undeclared = CollectEnd()
+        assertFalse(undeclared.offer(added = 3, atBottom = false, declaredTotal = null, collected = 3))
+    }
+
+    @Test fun aPageDeclaresItsTotalOnlyWhenItStatesOne() {
+        assertEquals(3, AmazonDom.declaredTotalOrNull(fixture("playlist.html")))
+        assertEquals(2, AmazonDom.declaredTotalOrNull(fixture("playlist_garbled.html")))
+        assertEquals(null, AmazonDom.declaredTotalOrNull(fixture("playlist_rows.html")))
+        assertEquals(null, AmazonDom.declaredTotalOrNull("<html><body>Nothing stated</body></html>"))
+    }
+
     @Test fun catalogCompletionFillsAnAmazonRowWithoutASpotifyId() = runBlocking {
         // The import's completion, driven with a stand-in catalog: an Amazon row (no
         // Spotify id, no ISRC) is completed on the strict title + artist + duration

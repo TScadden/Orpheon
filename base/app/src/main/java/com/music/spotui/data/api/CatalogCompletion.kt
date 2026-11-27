@@ -67,10 +67,27 @@ object CatalogCompletion {
         song.isrc.isBlank() || song.coverUrl.isBlank() || song.album.isBlank() ||
             song.explicit == app.myspoti.api.Explicitness.UNKNOWN
 
+    /**
+     * A song read wrong at its source: its title is its artist said again. An
+     * Amazon row can arrive this way when the page's artist line is read as the
+     * title; such a row names no recording, so nothing may complete it — matching
+     * it could only attach a stranger's song, and its "title artist" play query
+     * could only fail. It is left exactly as it was for the read to fix, or the
+     * user to re-import.
+     */
+    fun isMisread(song: ImportedSong): Boolean {
+        val title = Match.name(song.title)
+        return title.isNotEmpty() && title == Match.name(song.artist)
+    }
+
     /** Whether [c] may complete [song], under the strict bar in the class doc. */
     fun accepted(song: ImportedSong, c: Candidate): Boolean {
         val wanted = Match.isrc(song.isrc)
         if (wanted != null && Match.isrc(c.isrc) == wanted) return true
+        // A misread row is refused whatever the catalog offers. An ISRC-exact hit
+        // above is an identity, not a match, and stands: a self-titled song whose
+        // own source stated its ISRC is no misread.
+        if (isMisread(song)) return false
         val title = Match.title(song.title)
         if (title.isEmpty() || title != Match.title(c.title)) return false
         if (!artistMatches(song.artist, c.artists)) return false
@@ -115,12 +132,13 @@ object CatalogCompletion {
     /**
      * Every thin song of [songs] completed from [gather]'s candidates, blanks only, order
      * kept. A song whose gathering fails keeps its blanks (the pass as a whole never fails).
+     * A misread song (see [isMisread]) is never gathered for: it stays exactly as it was.
      */
     suspend fun complete(songs: List<ImportedSong>, gather: Gatherer): List<ImportedSong> = coroutineScope {
         val gate = Semaphore(IN_FLIGHT)
         var attempted = 0
         songs.map { song ->
-            if (!thin(song) || attempted >= MAX_PER_PASS) async { song }
+            if (!thin(song) || isMisread(song) || attempted >= MAX_PER_PASS) async { song }
             else {
                 attempted++
                 async {

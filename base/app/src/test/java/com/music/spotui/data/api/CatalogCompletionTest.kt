@@ -111,6 +111,26 @@ class CatalogCompletionTest {
         assertEquals(app.myspoti.api.Explicitness.CLEAN, CatalogCompletion.completed(song(), quiet).explicit)
     }
 
+    @Test fun aMisreadRowIsRefusedCompletion() = runBlocking {
+        // A row whose title is its artist said again (an Amazon row read with the
+        // artist line as its title) names no recording: even a candidate matching
+        // its garbled strings word for word may not complete it — that could only
+        // attach a stranger's song. It is not even gathered for.
+        val garbled = song(title = "The Testers", artist = "The Testers")
+        assertTrue(CatalogCompletion.isMisread(garbled))
+        assertFalse(CatalogCompletion.isMisread(song()))
+        val twin = hit(title = "The Testers", artists = listOf("The Testers"))
+        assertFalse(CatalogCompletion.accepted(garbled, twin))
+        var asked = 0
+        val out = CatalogCompletion.complete(listOf(garbled), CatalogCompletion.Gatherer { asked++; listOf(twin) })
+        assertEquals(0, asked)
+        assertEquals(garbled, out[0])
+        // But an ISRC the row's own source stated is an identity, not a match: a
+        // genuinely self-titled song carrying one still completes by it.
+        val selfTitled = song(title = "The Testers", artist = "The Testers", isrc = "USRC10000001")
+        assertTrue(CatalogCompletion.accepted(selfTitled, hit(title = "Anything", artists = listOf("Anyone"))))
+    }
+
     @Test fun aFailingGathererLeavesTheSongAsItWas() = runBlocking {
         val out = CatalogCompletion.complete(listOf(song()), CatalogCompletion.Gatherer { throw RuntimeException("down") })
         assertEquals(song(), out[0])

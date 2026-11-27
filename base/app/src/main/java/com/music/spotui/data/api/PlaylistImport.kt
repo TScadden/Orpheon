@@ -1,5 +1,7 @@
 package com.music.spotui.data.api
 
+import app.myspoti.engine.R
+import com.music.spotui.data.local.ImportedPlaylist
 import com.music.spotui.data.local.ImportedSong
 import com.music.spotui.data.offline.OfflineDownloader
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +55,28 @@ object PlaylistLinks {
         }
         return PlaylistLink.Unknown
     }
+}
+
+/**
+ * The source an imported playlist came by — "spotify", "amazon" or "csv" — the one
+ * truth every "Imported from …" line reads (the playlist page and the Library lists
+ * once disagreed: the lists hardcoded Spotify). The origin the import itself stated
+ * governs; a playlist stored before origins were kept is read from the link it came
+ * by, and one with no link at all came by file.
+ */
+fun importedOrigin(p: ImportedPlaylist): String = p.origin.ifBlank {
+    when (PlaylistLinks.parse(p.sourceUrl)) {
+        is PlaylistLink.Spotify -> "spotify"
+        is PlaylistLink.Amazon -> "amazon"
+        PlaylistLink.Unknown -> if (p.sourceUrl.isBlank()) "csv" else ""
+    }
+}
+
+/** The "Imported from …" line for an import [origin] (see [importedOrigin]). */
+fun importedOriginLabelRes(origin: String): Int = when (origin) {
+    "spotify" -> R.string.imported_playlist_subtitle
+    "amazon" -> R.string.imported_playlist_subtitle_amazon
+    else -> R.string.imported_playlist_subtitle_generic
 }
 
 /** A Spotify embed page read: the playlist's name, its songs, how many it declares, and the page's anonymous token. */

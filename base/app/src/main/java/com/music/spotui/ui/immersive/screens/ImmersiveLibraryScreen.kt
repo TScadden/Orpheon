@@ -353,7 +353,13 @@ private fun libraryEntries(entries: Response<List<LibraryEntry>>): Pair<List<Lib
     val localName = stringResource(R.string.lbl_local_files)
     val downloadsName = stringResource(R.string.lbl_downloads)
     val localSubtitle = stringResource(R.string.lbl_playlist) + " • " + stringResource(R.string.local_playlist_subtitle)
-    val importedSubtitle = stringResource(R.string.lbl_playlist) + " • " + stringResource(R.string.imported_playlist_subtitle)
+    // Each imported playlist's own origin, from the one source of truth the playlist
+    // page reads too — an Amazon import must not read "Imported from Spotify" here.
+    val importedSubtitle = { p: com.music.spotui.data.local.ImportedPlaylist ->
+        stringResource(R.string.lbl_playlist) + " • " + stringResource(
+            com.music.spotui.data.api.importedOriginLabelRes(com.music.spotui.data.api.importedOrigin(p)),
+        )
+    }
     val likedName = stringResource(R.string.lbl_liked_songs)
     val radioName = stringResource(R.string.live_radio_title)
     val packageName = LocalContext.current.packageName
@@ -394,7 +400,7 @@ private fun libraryEntries(entries: Response<List<LibraryEntry>>): Pair<List<Lib
         val importedLists = com.music.spotui.data.local.ImportedPlaylists.list().map { p ->
             LibraryEntry(
                 spotifyId = IMPORTED_PLAYLIST_PREFIX + p.id, name = p.name,
-                subtitle = importedSubtitle,
+                subtitle = importedSubtitle(p),
                 coverUri = if (p.cover.isNotBlank()) java.io.File(p.cover).toURI().toString()
                     else p.items.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl.orEmpty(), isPlaylist = true,
             )
