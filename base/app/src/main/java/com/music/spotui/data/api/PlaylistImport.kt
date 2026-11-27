@@ -234,7 +234,32 @@ object SpotifyEmbed {
 
 /** Fetching a public playlist's songs. The result always knows how many the source declared. */
 object PlaylistImport {
-    data class Imported(val name: String, val songs: List<ImportedSong>, val total: Int)
+    data class Imported(
+        val name: String,
+        val songs: List<ImportedSong>,
+        val total: Int,
+        /**
+         * The total the source itself stated, when the read carries one separately
+         * (an Amazon read: the page's own count). Null for the reads whose [total]
+         * is the haul's measure by construction (a Spotify read that paged to its
+         * end, a CSV file read whole).
+         */
+        val declaredTotal: Int? = null,
+        /**
+         * Whether this read's source states its total on a page that may not have
+         * stated it (an Amazon read). Then a null [declaredTotal] means the total
+         * is UNKNOWN, and the confirm step must say so plainly instead of printing
+         * the haul as the whole list ("9 of 9 songs read" over a 9-song window of
+         * an 84-song playlist, v29). Always false for Spotify and CSV reads.
+         */
+        val totalStated: Boolean = false,
+        /**
+         * The read's own journal (an Amazon read's per-pass scroller record, the
+         * [AmazonReadout] text), for the confirm step's Read details; null for
+         * the reads that have no page to journal.
+         */
+        val readDetails: String? = null,
+    )
 
     private val http by lazy { OkHttpClient.Builder().callTimeout(20, TimeUnit.SECONDS).build() }
     private const val UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36"

@@ -89,6 +89,8 @@
     <string name="import_failed">Couldn\'t read that playlist. Check the link and your connection.</string>
     <string name="import_count">%1$d of %2$d songs read</string>
     <string name="import_shortfall">Only %1$d of the %2$d songs could be read — the rest never loaded. You can keep these now and re-import the same link later to fill in the rest.</string>
+    <string name="import_total_unknown">%1$d songs read — Amazon didn\'t state this playlist\'s total, so this may be only part of the list.</string>
+    <string name="import_read_details">Read details</string>
     <string name="import_default_name">Imported playlist</string>
     <string name="home_continue_listening">Continue listening</string>
     <string name="home_frequent_plays">Your frequent plays</string>

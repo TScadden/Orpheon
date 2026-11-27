@@ -177,6 +177,8 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
     var fetchedOrigin by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var amazon by remember { mutableStateOf<com.music.spotui.data.api.AmazonReadSession?>(null) }
+    /** The fetched read's journal on screen (the Read details affordance), when asked for. */
+    var showReadDetails by remember { mutableStateOf(false) }
     val fieldColors = TextFieldDefaults.colors(
         focusedContainerColor = tone(0xFF3A3A3A), unfocusedContainerColor = tone(0xFF3A3A3A),
         focusedTextColor = AppText, unfocusedTextColor = AppText, cursorColor = Green,
@@ -269,13 +271,33 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
                         label = { Text(stringResource(R.string.lbl_playlist), color = AppMuted) },
                         colors = fieldColors, modifier = Modifier.fillMaxWidth(),
                     )
-                    Text(stringResource(R.string.import_count, got.songs.size, got.total), color = AppMuted, fontSize = 13.sp,
-                        modifier = Modifier.padding(top = 10.dp))
-                    // A read that gathered fewer songs than its source declares says
-                    // so plainly: a partial import is never dressed as a complete one.
-                    if (got.total > got.songs.size) {
-                        Text(stringResource(R.string.import_shortfall, got.songs.size, got.total), color = AppMuted, fontSize = 13.sp,
-                            modifier = Modifier.padding(top = 6.dp))
+                    // What the read may honestly say about its own size. A page read
+                    // whose source states its total on the page (Amazon) and never
+                    // stated it has no "of M" to print: the haul may be only part of
+                    // the list, and the line says exactly that — never "N of N",
+                    // which dresses a window up as the whole playlist.
+                    if (got.totalStated && got.declaredTotal == null) {
+                        Text(stringResource(R.string.import_total_unknown, got.songs.size), color = AppMuted, fontSize = 13.sp,
+                            modifier = Modifier.padding(top = 10.dp))
+                    } else {
+                        val total = got.declaredTotal ?: got.total
+                        Text(stringResource(R.string.import_count, got.songs.size, total), color = AppMuted, fontSize = 13.sp,
+                            modifier = Modifier.padding(top = 10.dp))
+                        // A read that gathered fewer songs than its source declares says
+                        // so plainly: a partial import is never dressed as a complete one.
+                        if (total > got.songs.size) {
+                            Text(stringResource(R.string.import_shortfall, got.songs.size, total), color = AppMuted, fontSize = 13.sp,
+                                modifier = Modifier.padding(top = 6.dp))
+                        }
+                    }
+                    // The read's journal, when it kept one (an Amazon read): every
+                    // pass's scrollers, movement and verdict, copyable — the
+                    // diagnosis that travels with a short haul.
+                    got.readDetails?.let {
+                        TextButton(
+                            onClick = { showReadDetails = true },
+                            modifier = Modifier.padding(top = 2.dp),
+                        ) { Text(stringResource(R.string.import_read_details), color = Green, fontSize = 13.sp) }
                     }
                 }
                 if (busy) Text(stringResource(R.string.loading_playlists), color = AppMuted, fontSize = 13.sp,
@@ -297,6 +319,33 @@ fun ImportPlaylistDialog(navController: NavController, onDismiss: () -> Unit) {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.lbl_cancel), color = AppText) }
         },
     )
+    // The fetched read's journal, on request: the same copyable readout the
+    // failure path shows, kept for a completed read too (see AmazonReadout).
+    if (showReadDetails) {
+        val details = fetched?.readDetails
+        AlertDialog(
+            onDismissRequest = { showReadDetails = false },
+            containerColor = SheetColor,
+            title = { Text(stringResource(R.string.import_read_details), color = AppText) },
+            text = {
+                if (details != null) {
+                    SelectionContainer {
+                        Text(
+                            details,
+                            color = AppText, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp)
+                                .verticalScroll(rememberScrollState()),
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showReadDetails = false }) {
+                    Text(stringResource(R.string.lbl_close), color = Green)
+                }
+            },
+        )
+    }
 }
 
 /** A picked file's display name without its extension: a playlist file's own name for its list. */
@@ -415,7 +464,14 @@ private fun amazonStatusText(session: com.music.spotui.data.api.AmazonReadSessio
         com.music.spotui.data.api.AmazonStage.FOUND_SONGS ->
             stringResource(R.string.import_amazon_status_found, session.foundCount)
         com.music.spotui.data.api.AmazonStage.COLLECTING ->
-            stringResource(R.string.import_amazon_status_collecting, session.foundCount, session.declaredTotal)
+            // An unstated total is not a denominator: "9 of 0" implied a whole
+            // the read never verified. Until the page states one, the count
+            // stands alone.
+            if (session.declaredTotal > 0) {
+                stringResource(R.string.import_amazon_status_collecting, session.foundCount, session.declaredTotal)
+            } else {
+                stringResource(R.string.import_amazon_status_found, session.foundCount)
+            }
         com.music.spotui.data.api.AmazonStage.NEEDS_CAPTCHA ->
             stringResource(R.string.import_amazon_check_body)
         com.music.spotui.data.api.AmazonStage.NEEDS_SIGN_IN ->
