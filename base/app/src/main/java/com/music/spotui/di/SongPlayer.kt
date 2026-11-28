@@ -419,6 +419,8 @@ object SongPlayer {
 
     /** Call on the main thread before navigating to logout. */
     fun clearSession() {
+        // The session's last play ends here, before its history is put aside for the account.
+        playCounter.close(SystemClock.elapsedRealtime())
         main.removeCallbacksAndMessages(null)
         // A play, pause or skip still waiting (a slow page, a page still loading) belongs to the
         // session that ends: it is dropped, not sent once the next account's page is ready.
@@ -695,7 +697,8 @@ object SongPlayer {
         )
         pushNotification(song, liked)
         saveLastTrack(song, uri, liked, s.contextUri.orEmpty(), s.contextName.orEmpty(), queue = spotifyQueueOf(id))
-        trackListen(uri, song, com.music.spotui.data.local.ListenHistory.Source.SPOTIFY, playing)
+        trackListen(uri, song, com.music.spotui.data.local.ListenHistory.Source.SPOTIFY, playing,
+            restarted = LocalRepeat.pageRestarted(!trackChanged, predicted, lengthBefore, reported))
         // A song never asked about (the one restored at launch is not a change): its state is asked
         // once, not read as "not liked" until the next song. A failed ask is not repeated by every state.
         if (!trackChanged && library[uri] == null) refreshCurrentLiked(fromState = true)
@@ -844,29 +847,44 @@ object SongPlayer {
         )
     }
 
-    // ── Listen history (in-app recap) ──
-    private var listenKey = ""
-    private var listenSong: SongsModel? = null
-    private var listenSource = com.music.spotui.data.local.ListenHistory.Source.SPOTIFY
-    private var listenPlayedMs = 0L
-    private var listenTickAt = 0L
-    private var listenWasPlaying = false
+    // ── Listen history (in-app recap): a play counts when a song starts (see PlayCounter) ──
+    private val playCounter = com.music.spotui.data.local.PlayCounter(object : com.music.spotui.data.local.PlayCounter.Sink {
+        override fun begin(listen: com.music.spotui.data.local.ListenHistory.Listen) { com.music.spotui.data.local.ListenHistory.beginListen(listen) }
+        override fun update(playedMs: Long) { com.music.spotui.data.local.ListenHistory.updateOpenListen(playedMs) }
+        override fun end(playedMs: Long) { com.music.spotui.data.local.ListenHistory.endListen(playedMs) }
+    })
 
-    /** Adds the time played since the last call; a new [key] closes the previous listen. */
-    private fun trackListen(key: String, song: SongsModel?, source: com.music.spotui.data.local.ListenHistory.Source, isPlaying: Boolean) {
-        val now = SystemClock.elapsedRealtime()
-        if (listenWasPlaying && listenTickAt > 0) listenPlayedMs += now - listenTickAt
-        if (key != listenKey) {
-            listenSong?.let { s ->
-                com.music.spotui.data.local.ListenHistory.record(com.music.spotui.data.local.ListenHistory.Listen(
-                    System.currentTimeMillis(), listenKey, s.title, s.singer, s.album, s.coverUri, listenPlayedMs, listenSource,
-                    com.music.spotui.data.local.ListenHistory.artistsOf(s.singer, s.artistIds),
-                ))
-            }
-            listenKey = key; listenSong = song; listenSource = source; listenPlayedMs = 0
+    /**
+     * The key a play of [song] counts under: the song's own uri when it has an id (a Spotify
+     * id, or a catalog key as its provider uri), so the same song heard as a stream, a download
+     * or on the engine is one song in the history; [raw] (the caller's key) stands otherwise.
+     */
+    private fun listenKeyOf(raw: String, song: SongsModel?): String {
+        val id = song?.spotifyTrackId.orEmpty()
+        if (id.isBlank()) return raw
+        return com.music.spotui.data.catalog.CatalogRuntime.uriOfKey(id) ?: if ('.' in id) raw else SPOTIFY_TRACK_PREFIX + id
+    }
+
+    /**
+     * One report of what is current to the play counter. [restarted]: the same song started
+     * again from the top (a repeat). [muted]: the report comes from a context whose plays do
+     * not count (the Mix editor's preview).
+     */
+    private fun trackListen(key: String, song: SongsModel?, source: com.music.spotui.data.local.ListenHistory.Source, isPlaying: Boolean, restarted: Boolean = false, muted: Boolean = false) {
+        val canonical = listenKeyOf(key, song)
+        val proto = song?.let { s ->
+            com.music.spotui.data.local.ListenHistory.Listen(
+                0, canonical, s.title, s.singer, s.album, s.coverUri, 0, source,
+                com.music.spotui.data.local.ListenHistory.artistsOf(s.singer, s.artistIds),
+            )
         }
-        listenTickAt = now
-        listenWasPlaying = isPlaying
+        playCounter.report(canonical, proto, isPlaying, restarted, muted,
+            SystemClock.elapsedRealtime(), System.currentTimeMillis())
+    }
+
+    /** The local player put the current song back at 0:00 to play it again (repeat): a new play. */
+    fun onLocalRestart() {
+        main.post { playCounter.restart(SystemClock.elapsedRealtime(), System.currentTimeMillis()) }
     }
 
     // ── Commands ──
@@ -3236,7 +3254,15 @@ object SongPlayer {
             if (songChanged) refreshCurrentLiked()
             val source = if (t.uri.scheme == "file") com.music.spotui.data.local.ListenHistory.Source.DOWNLOAD
                 else com.music.spotui.data.local.ListenHistory.Source.LOCAL
-            trackListen("local:${t.id}", song, source, isPlaying)
+            // The song's own uri when it has an id (a stream's answer, a download), so the same
+            // song counts as one however it was heard; a phone file keeps its local key.
+            val idOf = LocalPlayer.spotifyIdOf(t)
+            val key = when {
+                idOf.isBlank() -> "local:${t.id}"
+                else -> com.music.spotui.data.catalog.CatalogRuntime.uriOfKey(idOf)
+                    ?: if ('.' in idOf) "local:${t.id}" else SPOTIFY_TRACK_PREFIX + idOf
+            }
+            trackListen(key, song, source, isPlaying, muted = LocalPlayer.previewing)
             // An extension's stream or a download (it has a Spotify id): kept to come back to at launch.
             if (likeUri != null) {
                 val rest = LocalPlayer.upcoming().map { localSong(it.second) }.filter { it.spotifyTrackId.isNotBlank() }
