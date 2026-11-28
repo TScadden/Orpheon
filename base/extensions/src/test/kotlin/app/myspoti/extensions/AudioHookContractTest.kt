@@ -50,13 +50,15 @@ class AudioHookContractTest {
         });
     """.trimIndent()
 
-    private fun ask(track: TrackInfo): AudioStream? {
+    private fun ask(track: TrackInfo): AudioStream? = askWith(melzoLike, track)
+
+    private fun askWith(script: String, track: TrackInfo): AudioStream? {
         val m = Manifest(
             "io.test.melzolike", "Melzo-like", "1", author = "Test",
             provides = listOf("audio-source"),
             permissions = listOf(PermissionRequest("audio.source")),
         )
-        return ExtensionRuntime(m, melzoLike, host, m.asks().map { it.key }.toSet()).use { rt ->
+        return ExtensionRuntime(m, script, host, m.asks().map { it.key }.toSet()).use { rt ->
             rt.start()
             val raw = rt.call(Hook.AUDIO_SOURCE, AudioQuery.toJson(track, ahead = false), 8_000)
             raw?.let { runCatching { AudioStream.parse(it) }.getOrNull() }
@@ -99,5 +101,57 @@ class AudioHookContractTest {
         // A duration far off the recording's length scores no candidate: the
         // hook's length window refuses it exactly as it refuses a missing one.
         assertNull(ask(tearMeApart(durationMs = 120_000)))
+    }
+
+    // ── "WHERE DO YOU SLEEP?" (v34): a plain-credit Hype Playlist row that
+    // refused on the phone while its playlist-mate BLEED played. The row's real
+    // catalog facts (Deezer track 3978691491, read live): 192 s, ISRC
+    // USSM12308062, album THE FIRST TIME, the single artist The Kid LAROI. The
+    // fake below is the same Melzo decision shape with the recording's own
+    // length, 192 s. What these pin: a row completed the way the production
+    // completion completes it IS answered by the hook contract — so a refusal
+    // of this song is the stored row differing from this shape (its duration
+    // above all), or no ask ever reaching the hook, never the contract itself.
+
+    /** Melzo's resolver with "WHERE DO YOU SLEEP?"'s own recording: 192 s. */
+    private val melzoLikeSleep = """
+        myspoti.provide('audio-source', function (track) {
+          if (!track || !track.title || !(track.durationMs > 0)) return null;
+          var names = [track.artist || ''];
+          if (Array.isArray(track.artists)) track.artists.forEach(function (a) { names.push(a || ''); });
+          if (!names.some(function (n) { return String(n).trim().length > 0; })) return null;
+          var diff = 192 * 1000 - track.durationMs;
+          if (diff < -5000 || diff > 15000) return null;
+          return { url: 'https://example.org/where-do-you-sleep.m4a', headers: {}, mimeType: 'audio/mp4',
+                   durationMs: track.durationMs, codec: 'aac', expiresInMs: 300000 };
+        });
+    """.trimIndent()
+
+    /** The TrackInfo the production tap builds for the completed row (Api.importedSongOf →
+     * Extensions.trackInfo): it plays under its catalog key, its ISRC the completion's. */
+    private fun whereDoYouSleep(durationMs: Long, isrc: String? = "USSM12308062") = TrackInfo(
+        id = "deezer.3978691491", uri = "deezer:track:3978691491", title = "WHERE DO YOU SLEEP?",
+        artist = "The Kid LAROI", artists = listOf("The Kid LAROI"), album = "THE FIRST TIME",
+        durationMs = durationMs, isrc = isrc, cover = "https://img/sleep",
+    )
+
+    @Test fun theCompletedSleepRowIsAnswered() {
+        val stream = askWith(melzoLikeSleep, whereDoYouSleep(durationMs = 192_000))
+        assertNotNull(stream)
+        assertEquals("https://example.org/where-do-you-sleep.m4a", stream!!.url)
+    }
+
+    @Test fun theSleepRowWithoutAnIsrcIsAnsweredToo() {
+        // The hook never reads the ISRC: a row whose completion hit carried none
+        // still answers on title, artist and duration alone.
+        assertNotNull(askWith(melzoLikeSleep, whereDoYouSleep(durationMs = 192_000, isrc = null)))
+    }
+
+    @Test fun theSleepRowWithAStaleDurationIsRefused() {
+        // The conviction boundary, stated as a test: a stored duration more than
+        // 15 s under the recording's (or 5 s over) is refused exactly like none —
+        // 163 s against the 192 s recording is the shape a wrong fill would leave.
+        assertNull(askWith(melzoLikeSleep, whereDoYouSleep(durationMs = 163_000)))
+        assertNull(askWith(melzoLikeSleep, whereDoYouSleep(durationMs = 0)))
     }
 }

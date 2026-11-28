@@ -22,6 +22,7 @@ import androidx.media3.exoplayer.source.SampleStream
 import androidx.media3.exoplayer.trackselection.BaseTrackSelection
 import androidx.media3.exoplayer.trackselection.ExoTrackSelection
 import androidx.media3.exoplayer.upstream.DefaultAllocator
+import com.music.spotui.data.offline.ExtStreamCache
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -113,7 +114,7 @@ class ExtensionHlsFlowTest {
                 val requestLine = head.toString(Charsets.US_ASCII).lineSequence().firstOrNull().orEmpty()
                 val path = requestLine.split(' ').getOrNull(1)?.substringBefore('?') ?: "/"
                 requests += path
-                val (body, type) = when (path) {
+                val served: Pair<ByteArray, String>? = when (path) {
                     "/playlist.m3u8" -> playlist.toByteArray() to "application/vnd.apple.mpegurl"
                     "/init.mp4" -> fixture("init.mp4") to "audio/mp4"
                     "/data000.m4s" -> fixture("data000.m4s") to "audio/mp4"
@@ -121,11 +122,11 @@ class ExtensionHlsFlowTest {
                     else -> null
                 }
                 val out = s.getOutputStream()
-                if (body == null) {
+                if (served == null) {
                     out.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
                 } else {
-                    out.write("HTTP/1.1 200 OK\r\nContent-Type: $type\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray())
-                    out.write(body)
+                    out.write("HTTP/1.1 200 OK\r\nContent-Type: ${served.second}\r\nContent-Length: ${served.first.size}\r\nConnection: close\r\n\r\n".toByteArray())
+                    out.write(served.first)
                 }
                 out.flush()
             } catch (_: Exception) {
@@ -151,6 +152,7 @@ class ExtensionHlsFlowTest {
 
         override fun getSelectionReason(): Int = C.SELECTION_REASON_INITIAL
         override fun getSelectionData(): Any? = null
+        override fun getSelectedIndex(): Int = 0
     }
 
     private fun pump() {
@@ -176,7 +178,7 @@ class ExtensionHlsFlowTest {
 
             var timeline: Timeline? = null
             source.prepareSource(object : MediaSource.MediaSourceCaller {
-                override fun onSourceReady(s: MediaSource, t: Timeline) { timeline = t }
+                override fun onSourceInfoRefreshed(s: MediaSource, t: Timeline) { timeline = t }
             }, null, PlayerId.UNSET)
 
             val deadline = System.currentTimeMillis() + 60_000
@@ -193,10 +195,8 @@ class ExtensionHlsFlowTest {
                 window.durationUs > 15_000_000,
             )
 
-            val period = Timeline.Period()
-            tl.getPeriod(0, period)
             val mediaPeriod = source.createPeriod(
-                MediaSource.MediaPeriodId(period.uid), DefaultAllocator(true, 64 * 1024), 0L,
+                MediaSource.MediaPeriodId(tl.getUidOfPeriod(0)), DefaultAllocator(true, 64 * 1024), 0L,
             )
             var prepared = false
             mediaPeriod.prepare(object : MediaPeriod.Callback {
@@ -209,13 +209,13 @@ class ExtensionHlsFlowTest {
 
             val groups = mediaPeriod.trackGroups
             assertTrue("the period must expose a track group; requests: ${server.requests}", groups.length > 0)
-            val selection: ExoTrackSelection = FixedSelection(groups[0], 0)
+            val selection: ExoTrackSelection = FixedSelection(groups.get(0), 0)
             val streams = arrayOfNulls<SampleStream>(1)
             mediaPeriod.selectTracks(arrayOf(selection), booleanArrayOf(false), streams, booleanArrayOf(false), 0L)
             val stream = streams[0] ?: throw AssertionError("no sample stream was allocated; requests: ${server.requests}")
             mediaPeriod.continueLoading(LoadingInfo.Builder().setPlaybackPositionUs(0).build())
 
-            val formatHolder = androidx.media3.common.FormatHolder()
+            val formatHolder = androidx.media3.exoplayer.FormatHolder()
             val buffer = DecoderInputBuffer(DecoderInputBuffer.BUFFER_REPLACEMENT_MODE_NORMAL)
             var format: Format? = null
             var sampleBytes = -1
