@@ -204,8 +204,12 @@ class ExtensionHlsFlowTest {
                 override fun onContinueLoadingRequested(p: MediaPeriod) {
                     p.continueLoading(LoadingInfo.Builder().setPlaybackPositionUs(0).build())
                 }
-            })
-            while (!prepared) { beforeDeadline("period prepared"); pump(); Thread.sleep(10) }
+            }, 0L)
+            while (!prepared) {
+                beforeDeadline("period prepared")
+                mediaPeriod.maybeThrowPrepareError()
+                pump(); Thread.sleep(10)
+            }
 
             val groups = mediaPeriod.trackGroups
             assertTrue("the period must expose a track group; requests: ${server.requests}", groups.length > 0)
@@ -224,7 +228,6 @@ class ExtensionHlsFlowTest {
                 beforeDeadline("first sample (format=$format, requests=${server.requests})")
                 pump()
                 stream.maybeThrowError()
-                mediaPeriod.maybeThrowError()
                 if (stream.isReady) {
                     buffer.clear()
                     when (stream.readData(formatHolder, buffer, 0)) {
