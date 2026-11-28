@@ -7,7 +7,11 @@ import java.io.File
 /**
  * Every listen on this phone, whatever the source (Spotify, downloads, local files), for the
  * in-app recap. Stays on the phone; nothing is reported to Spotify or anyone else.
- * A listen counts after 30 s, like most services.
+ * A play counts the moment a song starts (v34, Tyson's rule — it used to count only after
+ * 30 s, and only once the next song began): [beginListen] writes the record at the start,
+ * and the time it plays for is written into that same record as it accrues ([updateOpenListen],
+ * [endListen]), so the recap's minutes stay honest and there is exactly one record per play.
+ * Records written by older versions (closed at the next song, 30 s or more) read the same.
  */
 object ListenHistory {
     enum class Source { SPOTIFY, DOWNLOAD, LOCAL }
@@ -35,7 +39,6 @@ object ListenHistory {
         return if (ids.size > 1 && names.size == ids.size) names else listOf(line.trim()).filter { it.isNotEmpty() }
     }
 
-    const val MIN_PLAYED_MS = 30_000L
     private var file: File? = null
     private val lock = Any()
 
@@ -43,21 +46,88 @@ object ListenHistory {
         file = File(context.filesDir, "listen_history.jsonl")
     }
 
-    fun record(listen: Listen) {
-        if (listen.playedMs < MIN_PLAYED_MS || listen.title.isBlank()) return
-        val f = file ?: return
-        val line = JSONObject()
-            .put("at", listen.atMs).put("key", listen.key).put("title", listen.title).put("artist", listen.artist)
-            .put("album", listen.album).put("cover", listen.cover).put("ms", listen.playedMs).put("src", listen.source.name)
-            .put("artists", org.json.JSONArray(listen.artists))
-            .toString()
+    private fun lineOf(listen: Listen): String = JSONObject()
+        .put("at", listen.atMs).put("key", listen.key).put("title", listen.title).put("artist", listen.artist)
+        .put("album", listen.album).put("cover", listen.cover).put("ms", listen.playedMs).put("src", listen.source.name)
+        .put("artists", org.json.JSONArray(listen.artists))
+        .toString()
+
+    /*
+     * The record of the play now open (begun, not yet ended): its line is the file's last one,
+     * so its played time is written back into that line in place. [openOffset] is the byte
+     * offset of the line, [openAtMs]/[openKey] say whose it is; both are forgotten whenever
+     * the file is put aside or taken back (park/claim/clear), where offsets stop meaning
+     * anything. The in-memory copy in [loaded] is updated alongside either way.
+     */
+    private var openAtMs = -1L
+    private var openKey: String? = null
+    private var openOffset = -1L
+
+    private fun forgetOpen() { openAtMs = -1L; openKey = null; openOffset = -1L }
+
+    /**
+     * A play of [listen] starts now: its record is written at once (its [Listen.playedMs] is
+     * the caller's start value, 0). False when there is nothing to write to or no title: the
+     * play is then not counted, and the updates that follow it are no-ops.
+     */
+    fun beginListen(listen: Listen): Boolean {
+        if (listen.title.isBlank()) return false
+        val f = file ?: return false
         synchronized(lock) {
-            f.appendText(line + "\n")
-            loaded?.let { loaded = it + listen }
+            runCatching {
+                openOffset = if (f.exists()) f.length() else 0L
+                f.appendText(lineOf(listen) + "\n")
+                openAtMs = listen.atMs; openKey = listen.key
+                loaded?.let { loaded = it + listen }
+            }.onFailure { forgetOpen(); return false }
+        }
+        return true
+    }
+
+    /** The open play has played [playedMs] so far: its record (in memory and on disk) says so. */
+    fun updateOpenListen(playedMs: Long) {
+        synchronized(lock) {
+            val at = openAtMs; val key = openKey ?: return@synchronized
+            loaded?.let { list ->
+                val i = list.indexOfLast { it.atMs == at && it.key == key }
+                if (i >= 0 && list[i].playedMs != playedMs) loaded = list.toMutableList().also { it[i] = list[i].copy(playedMs = playedMs) }
+            }
+            val f = file ?: return@synchronized
+            val offset = openOffset
+            if (offset < 0 || !f.exists() || f.length() <= offset) return@synchronized
+            runCatching {
+                java.io.RandomAccessFile(f, "rw").use { raf ->
+                    raf.seek(offset)
+                    // The open play's line is the file's last: read it as UTF-8 bytes
+                    // (RandomAccessFile.readLine would mangle a non-ASCII title).
+                    val raw = ByteArray((raf.length() - offset).toInt().coerceAtLeast(0))
+                    raf.readFully(raw)
+                    val head = String(raw, Charsets.UTF_8).substringBefore('\n')
+                    if (head.isBlank()) return@runCatching
+                    val o = JSONObject(head)
+                    // The line there is no longer the open play's (the file moved under it):
+                    // leave the disk alone rather than write over another record.
+                    if (o.getLong("at") != at || o.getString("key") != key) { openOffset = -1L; return@runCatching }
+                    val current = Listen(at, key, o.getString("title"), o.getString("artist"), o.optString("album"),
+                        o.optString("cover"), o.getLong("ms"), Source.valueOf(o.optString("src", "SPOTIFY")),
+                        o.optJSONArray("artists")?.let { a -> List(a.length()) { a.getString(it) } }
+                            ?: listOf(o.getString("artist").substringBefore(",").trim()))
+                    val bytes = (lineOf(current.copy(playedMs = playedMs)) + "\n").toByteArray(Charsets.UTF_8)
+                    raf.seek(offset)
+                    raf.write(bytes)
+                    raf.setLength(offset + bytes.size)
+                }
+            }
         }
     }
 
-    /** The history as last read, kept while the file only grows by [record]: not read again for every screen. */
+    /** The open play is over: [playedMs] is its final played time. */
+    fun endListen(playedMs: Long) {
+        updateOpenListen(playedMs)
+        synchronized(lock) { forgetOpen() }
+    }
+
+    /** The history as last read, kept while the file only grows by [beginListen]: not read again for every screen. */
     private var loaded: List<Listen>? = null
 
     fun all(): List<Listen> = synchronized(lock) {
@@ -77,7 +147,7 @@ object ListenHistory {
         list
     }
 
-    fun clear() = synchronized(lock) { loaded = null; file?.delete(); owner()?.delete() }
+    fun clear() = synchronized(lock) { loaded = null; forgetOpen(); file?.delete(); owner()?.delete() }
 
     /*
      * The history belongs to the account it was heard on, as the downloads do (OfflineAccounts): on an
@@ -103,6 +173,7 @@ object ListenHistory {
         runCatching { if (f.exists()) moveInto(f, parked(owner)!!) }
         owner()?.delete()
         loaded = null
+        forgetOpen()
     }
 
     /** The account [key] is signed in: its own history is the one shown; one with no owner yet becomes its own. */
@@ -116,6 +187,7 @@ object ListenHistory {
             owner()?.writeText(key)
         }
         loaded = null
+        forgetOpen()
     }
 
     /** The account [key] is removed from the phone: its history put aside goes with it. */

@@ -44,6 +44,9 @@ object LocalPlayer {
     val contextName: String get() = if (current()?.let { it in radioSongs } == true) radioName else listName
     /** The Spotify list the queue was taken from ("" for Local Files and the Downloaded list, and in its song radio). */
     val contextUri: String get() = if (current()?.let { it in radioSongs } == true) "" else listUri
+
+    /** The queue playing is the Mix editor's transition preview: auditions, not listens. */
+    val previewing: Boolean get() = listUri == PREVIEW_CONTEXT
     private var listUri: String = ""
     private var exo: ExoPlayer? = null
     private val errors = StreamErrors()
@@ -1754,7 +1757,7 @@ object LocalPlayer {
         exo?.let {
             if (it.hasNextMediaItem()) { com.music.spotui.extensions.Extensions.skipAsked("forward"); it.seekToNextMediaItem() }
             // A queue of one song repeated (see LocalRepeat): Next plays it again, as the queue's wrap would.
-            else if (repeat == LocalRepeat.ALL) { com.music.spotui.extensions.Extensions.skipAsked("forward"); it.seekTo(0, 0L) }
+            else if (repeat == LocalRepeat.ALL) { com.music.spotui.extensions.Extensions.skipAsked("forward"); it.seekTo(0, 0L); SongPlayer.onLocalRestart() }
             else if (atEnd(it)) com.music.spotui.extensions.Extensions.skipAsked("forward")
         }
     }
@@ -2144,6 +2147,9 @@ object LocalPlayer {
         if (repeat == LocalRepeat.ONCE) replaying = tracks.getOrNull(index)
         p.seekTo(index, 0L)
         p.play()
+        // A new play of the song counts (v34: a play counts when a song starts, a repeat
+        // from the top included), as the state reports that follow would not show it.
+        SongPlayer.onLocalRestart()
         log("repeat: ${current()?.title} plays again from ${p.currentPosition} ms (it ended at $endedAt ms)")
     }
 
