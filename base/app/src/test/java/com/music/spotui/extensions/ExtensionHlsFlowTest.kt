@@ -159,6 +159,12 @@ class ExtensionHlsFlowTest {
         shadowOf(Looper.getMainLooper()).idle()
     }
 
+    /** TEMPORARY negative control (removed before merge): proves this class is discovered and run by CI. */
+    @Test
+    fun negativeControlDeliberateFailure() {
+        throw AssertionError("negative control marker: ExtensionHlsFlowTest executed")
+    }
+
     @Test
     fun hlsItemFlowsThroughTheProductionChainToSamples() {
         val server = FixtureServer()
@@ -187,7 +193,7 @@ class ExtensionHlsFlowTest {
                     throw AssertionError("timed out at $stage; requests so far: ${server.requests}")
             }
             while (timeline == null) { beforeDeadline("source ready"); pump(); Thread.sleep(10) }
-            val tl = timeline!!
+            val tl = timeline ?: throw AssertionError("unreachable: the loop only exits on a timeline")
             val window = Timeline.Window()
             tl.getWindow(0, window)
             assertTrue(
