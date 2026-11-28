@@ -25,7 +25,7 @@ class ListenHistoryPlayStartTest {
 
     @Before
     fun setUp() {
-        val context = RuntimeEnvironment.getApplication<Context>()
+        val context: Context = RuntimeEnvironment.getApplication()
         ListenHistory.init(context)
         ListenHistory.clear()
         file = File(context.filesDir, "listen_history.jsonl")
