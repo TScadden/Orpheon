@@ -159,12 +159,6 @@ class ExtensionHlsFlowTest {
         shadowOf(Looper.getMainLooper()).idle()
     }
 
-    /** TEMPORARY negative control (removed before merge): proves this class is discovered and run by CI. */
-    @Test
-    fun negativeControlDeliberateFailure() {
-        throw AssertionError("negative control marker: ExtensionHlsFlowTest executed")
-    }
-
     @Test
     fun hlsItemFlowsThroughTheProductionChainToSamples() {
         val server = FixtureServer()
